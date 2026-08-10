@@ -1,0 +1,14 @@
+[package]
+name = "quiz-arena-proto"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+buffa.workspace = true
+buffa-types.workspace = true
+connectrpc.workspace = true
+serde.workspace = true
+
+[build-dependencies]
+anyhow.workspace = true
+connectrpc-build.workspace = true

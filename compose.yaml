@@ -1,0 +1,25 @@
+services:
+  tidb:
+    image: docker.io/pingcap/tidb:latest
+    container_name: quiz-arena-backend-tidb
+    restart: unless-stopped
+    command:
+      - --path=/data
+    ports:
+      - "4000:4000" # MySQL protocol
+      - "10080:10080" # HTTP status and metrics
+    volumes:
+      - tidb-data:/data
+  lgtm:
+    image: docker.io/grafana/otel-lgtm:latest
+    container_name: quiz-arena-backend-otel-lgtm
+    restart: unless-stopped
+    ports:
+      - "3000:3000" # Grafana UI
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+    volumes:
+      - lgtm-data:/data
+volumes:
+  tidb-data:
+  lgtm-data:
