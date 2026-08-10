@@ -1,0 +1,13 @@
+# Example configuration showing every setting with its default value.
+
+[server]
+listen_addr = "0.0.0.0:8080"
+
+[telemetry]
+enabled = false
+otlp_endpoint = "http://localhost:4317"
+otlp_protocol = "grpc"
+service_name = "quiz-arena-backend"
+
+[greet]
+database_url = "sqlite::memory:"

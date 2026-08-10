@@ -1,0 +1,13 @@
+services:
+  lgtm:
+    image: docker.io/grafana/otel-lgtm:latest
+    container_name: otel-lgtm
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - lgtm-data:/data
+volumes:
+  lgtm-data:
