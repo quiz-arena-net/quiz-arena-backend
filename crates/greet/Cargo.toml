@@ -1,0 +1,19 @@
+[package]
+name = "quiz-arena-greet"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+quiz-arena-shared.workspace = true
+quiz-arena-proto.workspace = true
+
+anyhow.workspace = true
+async-trait.workspace = true
+connectrpc.workspace = true
+log.workspace = true
+opentelemetry.workspace = true
+sea-orm.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true

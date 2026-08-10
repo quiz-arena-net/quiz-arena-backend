@@ -1,0 +1,25 @@
+# One file, shared by every service in the workspace.
+#
+# `[server]` and `[telemetry]` apply to all of them. Each service reads the
+# section named after itself and ignores the rest, so adding a service means
+# adding a section here.
+#
+# Per-service overrides go in the environment rather than in this file, since
+# the values that differ are the ones that differ per process:
+#
+# ```sh
+# QUIZ_ARENA_SERVER_LISTEN_ADDR=127.0.0.1:8081 cargo run -p quiz-arena-quiz
+# ```
+
+[server]
+# Every service listens here. Correct in containers, where each has its own
+# address. Running several on one host needs the override above.
+listen_addr = "0.0.0.0:8080"
+
+[telemetry]
+enabled = false
+otlp_endpoint = "http://localhost:4317"
+otlp_protocol = "grpc"
+
+[greet]
+database_url = "sqlite::memory:"
