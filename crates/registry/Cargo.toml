@@ -1,0 +1,15 @@
+[package]
+name = "quiz-arena-registry"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+quiz-arena-shared.workspace = true
+quiz-arena-proto.workspace = true
+
+anyhow.workspace = true
+connectrpc.workspace = true
+facet.workspace = true
+opentelemetry.workspace = true
+tokio.workspace = true
+tracing.workspace = true
