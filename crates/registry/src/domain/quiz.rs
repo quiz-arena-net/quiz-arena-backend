@@ -4,6 +4,8 @@ use isolang::Language;
 use mitsein::{btree_set1::BTreeSet1, vec1::Vec1};
 use uuid::Uuid;
 
+use super::{tag::Tag, user::UserId};
+
 /// Uniquely identifies a quiz.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct QuizId(Uuid);
@@ -14,20 +16,6 @@ impl QuizId {
         Self(Uuid::now_v7())
     }
 
-    pub(crate) fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    pub(crate) fn as_uuid(&self) -> Uuid {
-        self.0
-    }
-}
-
-/// Uniquely identifies the author of a quiz.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct AuthorId(Uuid);
-
-impl AuthorId {
     pub(crate) fn from_uuid(uuid: Uuid) -> Self {
         Self(uuid)
     }
@@ -398,46 +386,6 @@ pub(crate) enum ResponseMode {
     CharacterChoices(CharacterChoices),
 }
 
-/// A tag used to classify or discover quizzes.
-///
-/// Guaranteed to be 1 to 32 characters, not only whitespace, and free of NUL.
-/// Accepted text is preserved exactly.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct Tag(String);
-
-impl Tag {
-    pub(crate) const MAX_LENGTH: usize = 32;
-
-    pub(crate) fn new(text: impl Into<String>) -> Result<Self, TagError> {
-        let text = text.into();
-        if text.trim().is_empty() {
-            return Err(TagError::Blank);
-        }
-        let length = text.chars().count();
-        if length > Self::MAX_LENGTH {
-            return Err(TagError::TooLong { length });
-        }
-        if text.contains('\0') {
-            return Err(TagError::InvalidCharacter);
-        }
-        Ok(Self(text))
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum TagError {
-    #[error("tag must not be empty or only whitespace")]
-    Blank,
-    #[error("tag must be at most {} characters, got {length}", Tag::MAX_LENGTH)]
-    TooLong { length: usize },
-    #[error("tag must not contain NUL")]
-    InvalidCharacter,
-}
-
 /// A quiz that can be presented to players.
 ///
 /// A quiz defines its authored content and the response modes it supports.
@@ -453,7 +401,7 @@ pub(crate) struct Quiz {
     id: QuizId,
 
     /// The author who created this quiz.
-    author: AuthorId,
+    author: UserId,
 
     /// The question text presented to players.
     prompt: Prompt,
@@ -498,7 +446,7 @@ impl Quiz {
 
     /// Creates a new quiz with a freshly generated identifier.
     pub(crate) fn new(
-        author: AuthorId,
+        author: UserId,
         prompt: Prompt,
         canonical_answer: CanonicalAnswer,
         response_modes: Vec1<ResponseMode>,
@@ -525,7 +473,7 @@ impl Quiz {
     /// apply only when creating a quiz are not rechecked here.
     pub(crate) fn from_persistence(
         id: QuizId,
-        author: AuthorId,
+        author: UserId,
         prompt: Prompt,
         canonical_answer: CanonicalAnswer,
         response_modes: Vec1<ResponseMode>,
@@ -549,7 +497,7 @@ impl Quiz {
         self.id
     }
 
-    pub(crate) fn author(&self) -> AuthorId {
+    pub(crate) fn author(&self) -> UserId {
         self.author
     }
 
@@ -648,7 +596,7 @@ mod tests {
         tags: BTreeSet<Tag>,
     ) -> Result<Quiz, QuizError> {
         Quiz::new(
-            AuthorId::from_uuid(Uuid::now_v7()),
+            UserId::from_uuid(Uuid::now_v7()),
             Prompt::new("What is the capital of Japan?").unwrap(),
             CanonicalAnswer::new("Tokyo").unwrap(),
             response_modes,
@@ -663,7 +611,6 @@ mod tests {
         assert!(CanonicalAnswer::new("x".repeat(200)).is_ok());
         assert!(FreeInputAnswer::new("x".repeat(200)).is_ok());
         assert!(MultipleChoiceAnswer::new("x".repeat(200)).is_ok());
-        assert!(Tag::new("x".repeat(32)).is_ok());
     }
 
     #[test]
@@ -684,18 +631,14 @@ mod tests {
             MultipleChoiceAnswer::new("x".repeat(201)),
             Err(MultipleChoiceAnswerError::TooLong { length: 201 })
         );
-        assert_eq!(
-            Tag::new("x".repeat(33)),
-            Err(TagError::TooLong { length: 33 })
-        );
     }
 
     #[test]
     fn counts_length_in_characters_not_bytes() {
-        assert!(Tag::new("あ".repeat(32)).is_ok());
+        assert!(Prompt::new("あ".repeat(1000)).is_ok());
         assert_eq!(
-            Tag::new("あ".repeat(33)),
-            Err(TagError::TooLong { length: 33 })
+            Prompt::new("あ".repeat(1001)),
+            Err(PromptError::TooLong { length: 1001 })
         );
     }
 
@@ -718,7 +661,6 @@ mod tests {
                 Err(MultipleChoiceAnswerError::Blank),
                 "{text:?}"
             );
-            assert_eq!(Tag::new(text), Err(TagError::Blank), "{text:?}");
         }
     }
 
@@ -745,7 +687,6 @@ mod tests {
                 Err(MultipleChoiceAnswerError::InvalidCharacter),
                 "{text:?}"
             );
-            assert_eq!(Tag::new(text), Err(TagError::InvalidCharacter), "{text:?}");
         }
     }
 
@@ -753,7 +694,6 @@ mod tests {
     fn preserves_accepted_text_exactly() {
         for text in [" padded ", "Tokyo", "東京", "a\u{301}"] {
             assert_eq!(Prompt::new(text).unwrap().as_str(), text);
-            assert_eq!(Tag::new(text).unwrap().as_str(), text);
         }
     }
 
@@ -863,7 +803,7 @@ mod tests {
         let rehydrate = |response_modes, tags| {
             Quiz::from_persistence(
                 QuizId::new(),
-                AuthorId::from_uuid(Uuid::now_v7()),
+                UserId::from_uuid(Uuid::now_v7()),
                 Prompt::new("What is the capital of Japan?").unwrap(),
                 CanonicalAnswer::new("Tokyo").unwrap(),
                 response_modes,
