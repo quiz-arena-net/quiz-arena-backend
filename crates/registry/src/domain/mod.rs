@@ -1,4 +1,5 @@
 mod quiz;
+mod quiz_list;
 mod tag;
 mod user;
 
