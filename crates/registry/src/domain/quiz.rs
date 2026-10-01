@@ -264,7 +264,7 @@ pub(crate) enum TextChoiceAnswerError {
 
 /// The player selects from a collection of predefined text answers.
 ///
-/// No answer is both correct and wrong.
+/// Guaranteed to hold at most 6 answers, none of them both correct and wrong.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct TextChoice {
     /// Determines whether one or all correct answers must be selected.
@@ -281,6 +281,8 @@ pub(crate) struct TextChoice {
 }
 
 impl TextChoice {
+    pub(crate) const MAX_ANSWERS: usize = 6;
+
     pub(crate) fn new(
         choice_requirement: ChoiceRequirement,
         correct_answers: BTreeSet1<TextChoiceAnswer>,
@@ -288,6 +290,10 @@ impl TextChoice {
     ) -> Result<Self, TextChoiceError> {
         if !correct_answers.is_disjoint(&wrong_answers) {
             return Err(TextChoiceError::AnswerBothCorrectAndWrong);
+        }
+        let count = correct_answers.len().get() + wrong_answers.len();
+        if count > Self::MAX_ANSWERS {
+            return Err(TextChoiceError::TooManyAnswers { count });
         }
         Ok(Self {
             choice_requirement,
@@ -313,6 +319,11 @@ impl TextChoice {
 pub(crate) enum TextChoiceError {
     #[error("an answer must not be both correct and wrong")]
     AnswerBothCorrectAndWrong,
+    #[error(
+        "a text choice must have at most {} answers, got {count}",
+        TextChoice::MAX_ANSWERS
+    )]
+    TooManyAnswers { count: usize },
 }
 
 /// Text shown alongside the image of an [`ImageChoiceAnswer`].
@@ -959,6 +970,25 @@ mod tests {
                 BTreeSet::new(),
             )
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn rejects_more_than_six_text_choice_answers() {
+        let text_choice = |wrong_count: usize| {
+            TextChoice::new(
+                ChoiceRequirement::One,
+                BTreeSet1::from_one(TextChoiceAnswer::new("correct").unwrap()),
+                (0..wrong_count)
+                    .map(|index| TextChoiceAnswer::new(format!("wrong{index}")).unwrap())
+                    .collect(),
+            )
+        };
+
+        assert!(text_choice(5).is_ok());
+        assert_eq!(
+            text_choice(6),
+            Err(TextChoiceError::TooManyAnswers { count: 7 })
         );
     }
 
