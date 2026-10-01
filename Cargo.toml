@@ -24,7 +24,9 @@ connectrpc-reflection = "0.8.0"
 facet = { version = "0.46.5", features = ["net"] }
 facet-json = "0.46.1"
 facet-value = "0.46.0"
+isolang = "2.4.0"
 log = "0.4.33"
+mitsein = "0.9.0"
 opentelemetry = "0.32.0"
 opentelemetry-appender-tracing = "0.32.0"
 opentelemetry-http = "0.32.0"
@@ -39,3 +41,4 @@ tower = { version = "0.5.3", features = ["util"] }
 tracing = "0.1.44"
 tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.26.1", features = ["v7"] }
