@@ -4,7 +4,11 @@ use isolang::Language;
 use mitsein::{btree_set1::BTreeSet1, vec1::Vec1};
 use uuid::Uuid;
 
-use super::{tag::Tag, user::UserId};
+use super::{
+    media::{Media, MediaKind},
+    tag::Tag,
+    user::UserId,
+};
 
 /// Uniquely identifies a quiz.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -30,22 +34,22 @@ impl QuizId {
 /// Guaranteed to be 1 to 1000 characters, not only whitespace, and free of NUL.
 /// Accepted text is preserved exactly.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct Prompt(String);
+pub(crate) struct PromptText(String);
 
-impl Prompt {
+impl PromptText {
     pub(crate) const MAX_LENGTH: usize = 1000;
 
-    pub(crate) fn new(text: impl Into<String>) -> Result<Self, PromptError> {
+    pub(crate) fn new(text: impl Into<String>) -> Result<Self, PromptTextError> {
         let text = text.into();
         if text.trim().is_empty() {
-            return Err(PromptError::Blank);
+            return Err(PromptTextError::Blank);
         }
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
-            return Err(PromptError::TooLong { length });
+            return Err(PromptTextError::TooLong { length });
         }
         if text.contains('\0') {
-            return Err(PromptError::InvalidCharacter);
+            return Err(PromptTextError::InvalidCharacter);
         }
         Ok(Self(text))
     }
@@ -56,16 +60,40 @@ impl Prompt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum PromptError {
-    #[error("prompt must not be empty or only whitespace")]
+pub(crate) enum PromptTextError {
+    #[error("prompt text must not be empty or only whitespace")]
     Blank,
     #[error(
-        "prompt must be at most {} characters, got {length}",
-        Prompt::MAX_LENGTH
+        "prompt text must be at most {} characters, got {length}",
+        PromptText::MAX_LENGTH
     )]
     TooLong { length: usize },
-    #[error("prompt must not contain NUL")]
+    #[error("prompt text must not contain NUL")]
     InvalidCharacter,
+}
+
+/// The question presented to players.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct Prompt {
+    /// The question text.
+    text: PromptText,
+
+    /// Media presented alongside the text.
+    media: Option<Media>,
+}
+
+impl Prompt {
+    pub(crate) fn new(text: PromptText, media: Option<Media>) -> Self {
+        Self { text, media }
+    }
+
+    pub(crate) fn text(&self) -> &PromptText {
+        &self.text
+    }
+
+    pub(crate) fn media(&self) -> Option<Media> {
+        self.media
+    }
 }
 
 /// The canonical answer shown to players when the answer is revealed.
@@ -161,10 +189,29 @@ pub(crate) enum FreeInputAnswerError {
     InvalidCharacter,
 }
 
-/// Specifies how many correct choices a player must select in a multiple-choice
-/// response.
+/// The player provides an unrestricted textual response.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct FreeInput {
+    /// Reference answers for judging.
+    ///
+    /// The actual judging strategy is configured separately by the session.
+    expected_answers: BTreeSet1<FreeInputAnswer>,
+}
+
+impl FreeInput {
+    pub(crate) fn new(expected_answers: BTreeSet1<FreeInputAnswer>) -> Self {
+        Self { expected_answers }
+    }
+
+    pub(crate) fn expected_answers(&self) -> &BTreeSet1<FreeInputAnswer> {
+        &self.expected_answers
+    }
+}
+
+/// Specifies how many correct choices a player must select in a [`TextChoice`]
+/// or [`ImageChoice`] response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum MultipleChoiceRequirement {
+pub(crate) enum ChoiceRequirement {
     /// Selecting any one correct answer is sufficient.
     One,
 
@@ -172,27 +219,27 @@ pub(crate) enum MultipleChoiceRequirement {
     All,
 }
 
-/// An answer presented as a choice in a multiple-choice response.
+/// An answer presented as text in a [`TextChoice`] response.
 ///
 /// Guaranteed to be 1 to 200 characters, not only whitespace, and free of NUL.
 /// Accepted text is preserved exactly.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct MultipleChoiceAnswer(String);
+pub(crate) struct TextChoiceAnswer(String);
 
-impl MultipleChoiceAnswer {
+impl TextChoiceAnswer {
     pub(crate) const MAX_LENGTH: usize = 200;
 
-    pub(crate) fn new(text: impl Into<String>) -> Result<Self, MultipleChoiceAnswerError> {
+    pub(crate) fn new(text: impl Into<String>) -> Result<Self, TextChoiceAnswerError> {
         let text = text.into();
         if text.trim().is_empty() {
-            return Err(MultipleChoiceAnswerError::Blank);
+            return Err(TextChoiceAnswerError::Blank);
         }
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
-            return Err(MultipleChoiceAnswerError::TooLong { length });
+            return Err(TextChoiceAnswerError::TooLong { length });
         }
         if text.contains('\0') {
-            return Err(MultipleChoiceAnswerError::InvalidCharacter);
+            return Err(TextChoiceAnswerError::InvalidCharacter);
         }
         Ok(Self(text))
     }
@@ -203,16 +250,220 @@ impl MultipleChoiceAnswer {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum MultipleChoiceAnswerError {
-    #[error("multiple choice answer must not be empty or only whitespace")]
+pub(crate) enum TextChoiceAnswerError {
+    #[error("text choice answer must not be empty or only whitespace")]
     Blank,
     #[error(
-        "multiple choice answer must be at most {} characters, got {length}",
-        MultipleChoiceAnswer::MAX_LENGTH
+        "text choice answer must be at most {} characters, got {length}",
+        TextChoiceAnswer::MAX_LENGTH
     )]
     TooLong { length: usize },
-    #[error("multiple choice answer must not contain NUL")]
+    #[error("text choice answer must not contain NUL")]
     InvalidCharacter,
+}
+
+/// The player selects from a collection of predefined text answers.
+///
+/// No answer is both correct and wrong.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct TextChoice {
+    /// Determines whether one or all correct answers must be selected.
+    choice_requirement: ChoiceRequirement,
+
+    /// Choices that are considered correct.
+    correct_answers: BTreeSet1<TextChoiceAnswer>,
+
+    /// Choices that are considered incorrect.
+    ///
+    /// This set may be empty, for example when every presented choice is
+    /// intentionally correct.
+    wrong_answers: BTreeSet<TextChoiceAnswer>,
+}
+
+impl TextChoice {
+    pub(crate) fn new(
+        choice_requirement: ChoiceRequirement,
+        correct_answers: BTreeSet1<TextChoiceAnswer>,
+        wrong_answers: BTreeSet<TextChoiceAnswer>,
+    ) -> Result<Self, TextChoiceError> {
+        if !correct_answers.is_disjoint(&wrong_answers) {
+            return Err(TextChoiceError::AnswerBothCorrectAndWrong);
+        }
+        Ok(Self {
+            choice_requirement,
+            correct_answers,
+            wrong_answers,
+        })
+    }
+
+    pub(crate) fn choice_requirement(&self) -> ChoiceRequirement {
+        self.choice_requirement
+    }
+
+    pub(crate) fn correct_answers(&self) -> &BTreeSet1<TextChoiceAnswer> {
+        &self.correct_answers
+    }
+
+    pub(crate) fn wrong_answers(&self) -> &BTreeSet<TextChoiceAnswer> {
+        &self.wrong_answers
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum TextChoiceError {
+    #[error("an answer must not be both correct and wrong")]
+    AnswerBothCorrectAndWrong,
+}
+
+/// Text shown alongside the image of an [`ImageChoiceAnswer`].
+///
+/// Guaranteed to be 1 to 200 characters, not only whitespace, and free of NUL.
+/// Accepted text is preserved exactly.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct ImageCaption(String);
+
+impl ImageCaption {
+    pub(crate) const MAX_LENGTH: usize = 200;
+
+    pub(crate) fn new(text: impl Into<String>) -> Result<Self, ImageCaptionError> {
+        let text = text.into();
+        if text.trim().is_empty() {
+            return Err(ImageCaptionError::Blank);
+        }
+        let length = text.chars().count();
+        if length > Self::MAX_LENGTH {
+            return Err(ImageCaptionError::TooLong { length });
+        }
+        if text.contains('\0') {
+            return Err(ImageCaptionError::InvalidCharacter);
+        }
+        Ok(Self(text))
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum ImageCaptionError {
+    #[error("image caption must not be empty or only whitespace")]
+    Blank,
+    #[error(
+        "image caption must be at most {} characters, got {length}",
+        ImageCaption::MAX_LENGTH
+    )]
+    TooLong { length: usize },
+    #[error("image caption must not contain NUL")]
+    InvalidCharacter,
+}
+
+/// An answer presented as an image in an [`ImageChoice`] response.
+///
+/// Answers are told apart by their image.
+///
+/// Guaranteed to hold media of the image kind.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct ImageChoiceAnswer {
+    /// The image shown for this answer.
+    image: Media,
+
+    /// Text shown alongside the image.
+    caption: Option<ImageCaption>,
+}
+
+impl ImageChoiceAnswer {
+    pub(crate) fn new(
+        image: Media,
+        caption: Option<ImageCaption>,
+    ) -> Result<Self, ImageChoiceAnswerError> {
+        if image.kind() != MediaKind::Image {
+            return Err(ImageChoiceAnswerError::NotAnImage);
+        }
+        Ok(Self { image, caption })
+    }
+
+    pub(crate) fn image(&self) -> Media {
+        self.image
+    }
+
+    pub(crate) fn caption(&self) -> Option<&ImageCaption> {
+        self.caption.as_ref()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum ImageChoiceAnswerError {
+    #[error("an image choice answer must hold an image")]
+    NotAnImage,
+}
+
+/// The player selects from a collection of predefined image answers.
+///
+/// Guaranteed to hold at most 4 answers, no two of them with the same image.
+/// So no answer is both correct and wrong.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct ImageChoice {
+    /// Determines whether one or all correct answers must be selected.
+    choice_requirement: ChoiceRequirement,
+
+    /// Choices that are considered correct.
+    correct_answers: BTreeSet1<ImageChoiceAnswer>,
+
+    /// Choices that are considered incorrect.
+    ///
+    /// This set may be empty, for example when every presented choice is
+    /// intentionally correct.
+    wrong_answers: BTreeSet<ImageChoiceAnswer>,
+}
+
+impl ImageChoice {
+    pub(crate) const MAX_ANSWERS: usize = 4;
+
+    pub(crate) fn new(
+        choice_requirement: ChoiceRequirement,
+        correct_answers: BTreeSet1<ImageChoiceAnswer>,
+        wrong_answers: BTreeSet<ImageChoiceAnswer>,
+    ) -> Result<Self, ImageChoiceError> {
+        let mut images = BTreeSet::new();
+        for answer in wrong_answers.iter().chain(&correct_answers) {
+            if !images.insert(answer.image.id()) {
+                return Err(ImageChoiceError::DuplicateImage);
+            }
+        }
+        let count = images.len();
+        if count > Self::MAX_ANSWERS {
+            return Err(ImageChoiceError::TooManyAnswers { count });
+        }
+        Ok(Self {
+            choice_requirement,
+            correct_answers,
+            wrong_answers,
+        })
+    }
+
+    pub(crate) fn choice_requirement(&self) -> ChoiceRequirement {
+        self.choice_requirement
+    }
+
+    pub(crate) fn correct_answers(&self) -> &BTreeSet1<ImageChoiceAnswer> {
+        &self.correct_answers
+    }
+
+    pub(crate) fn wrong_answers(&self) -> &BTreeSet<ImageChoiceAnswer> {
+        &self.wrong_answers
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum ImageChoiceError {
+    #[error("an image must not appear in more than one answer")]
+    DuplicateImage,
+    #[error(
+        "an image choice must have at most {} answers, got {count}",
+        ImageChoice::MAX_ANSWERS
+    )]
+    TooManyAnswers { count: usize },
 }
 
 /// A single character used in a character-by-character response.
@@ -282,78 +533,6 @@ pub(crate) enum CharacterChoiceError {
     CorrectChoiceAmongWrongChoices,
 }
 
-/// The player provides an unrestricted textual response.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct FreeInput {
-    /// Reference answers for judging.
-    ///
-    /// The actual judging strategy is configured separately by the session.
-    expected_answers: BTreeSet1<FreeInputAnswer>,
-}
-
-impl FreeInput {
-    pub(crate) fn new(expected_answers: BTreeSet1<FreeInputAnswer>) -> Self {
-        Self { expected_answers }
-    }
-
-    pub(crate) fn expected_answers(&self) -> &BTreeSet1<FreeInputAnswer> {
-        &self.expected_answers
-    }
-}
-
-/// The player selects from a collection of predefined answers.
-///
-/// No answer is both correct and wrong.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct MultipleChoice {
-    /// Determines whether one or all correct answers must be selected.
-    choice_requirement: MultipleChoiceRequirement,
-
-    /// Choices that are considered correct.
-    correct_answers: BTreeSet1<MultipleChoiceAnswer>,
-
-    /// Choices that are considered incorrect.
-    ///
-    /// This set may be empty, for example when every presented choice is
-    /// intentionally correct.
-    wrong_answers: BTreeSet<MultipleChoiceAnswer>,
-}
-
-impl MultipleChoice {
-    pub(crate) fn new(
-        choice_requirement: MultipleChoiceRequirement,
-        correct_answers: BTreeSet1<MultipleChoiceAnswer>,
-        wrong_answers: BTreeSet<MultipleChoiceAnswer>,
-    ) -> Result<Self, MultipleChoiceError> {
-        if !correct_answers.is_disjoint(&wrong_answers) {
-            return Err(MultipleChoiceError::AnswerBothCorrectAndWrong);
-        }
-        Ok(Self {
-            choice_requirement,
-            correct_answers,
-            wrong_answers,
-        })
-    }
-
-    pub(crate) fn choice_requirement(&self) -> MultipleChoiceRequirement {
-        self.choice_requirement
-    }
-
-    pub(crate) fn correct_answers(&self) -> &BTreeSet1<MultipleChoiceAnswer> {
-        &self.correct_answers
-    }
-
-    pub(crate) fn wrong_answers(&self) -> &BTreeSet<MultipleChoiceAnswer> {
-        &self.wrong_answers
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum MultipleChoiceError {
-    #[error("an answer must not be both correct and wrong")]
-    AnswerBothCorrectAndWrong,
-}
-
 /// The player constructs the answer one character at a time by selecting from a
 /// set of candidate characters at each position.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -382,7 +561,8 @@ impl CharacterChoices {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ResponseMode {
     FreeInput(FreeInput),
-    MultipleChoice(MultipleChoice),
+    TextChoice(TextChoice),
+    ImageChoice(ImageChoice),
     CharacterChoices(CharacterChoices),
 }
 
@@ -403,7 +583,7 @@ pub(crate) struct Quiz {
     /// The author who created this quiz.
     author: UserId,
 
-    /// The question text presented to players.
+    /// The question presented to players.
     prompt: Prompt,
 
     /// The canonical answer displayed when the answer is revealed.
@@ -563,6 +743,7 @@ pub(crate) enum QuizError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::media::MediaId;
 
     fn character(character: char) -> Character {
         Character::new(character).unwrap()
@@ -574,12 +755,12 @@ mod tests {
         )))
     }
 
-    fn multiple_choice() -> ResponseMode {
-        ResponseMode::MultipleChoice(
-            MultipleChoice::new(
-                MultipleChoiceRequirement::One,
-                BTreeSet1::from_one(MultipleChoiceAnswer::new("Tokyo").unwrap()),
-                BTreeSet::from([MultipleChoiceAnswer::new("Kyoto").unwrap()]),
+    fn text_choice() -> ResponseMode {
+        ResponseMode::TextChoice(
+            TextChoice::new(
+                ChoiceRequirement::One,
+                BTreeSet1::from_one(TextChoiceAnswer::new("Tokyo").unwrap()),
+                BTreeSet::from([TextChoiceAnswer::new("Kyoto").unwrap()]),
             )
             .unwrap(),
         )
@@ -597,7 +778,10 @@ mod tests {
     ) -> Result<Quiz, QuizError> {
         Quiz::new(
             UserId::from_uuid(Uuid::now_v7()),
-            Prompt::new("What is the capital of Japan?").unwrap(),
+            Prompt::new(
+                PromptText::new("What is the capital of Japan?").unwrap(),
+                None,
+            ),
             CanonicalAnswer::new("Tokyo").unwrap(),
             response_modes,
             Language::Eng,
@@ -607,17 +791,18 @@ mod tests {
 
     #[test]
     fn accepts_text_within_bounds() {
-        assert!(Prompt::new("x".repeat(1000)).is_ok());
+        assert!(PromptText::new("x".repeat(1000)).is_ok());
         assert!(CanonicalAnswer::new("x".repeat(200)).is_ok());
         assert!(FreeInputAnswer::new("x".repeat(200)).is_ok());
-        assert!(MultipleChoiceAnswer::new("x".repeat(200)).is_ok());
+        assert!(TextChoiceAnswer::new("x".repeat(200)).is_ok());
+        assert!(ImageCaption::new("x".repeat(200)).is_ok());
     }
 
     #[test]
     fn rejects_text_over_the_limit() {
         assert_eq!(
-            Prompt::new("x".repeat(1001)),
-            Err(PromptError::TooLong { length: 1001 })
+            PromptText::new("x".repeat(1001)),
+            Err(PromptTextError::TooLong { length: 1001 })
         );
         assert_eq!(
             CanonicalAnswer::new("x".repeat(201)),
@@ -628,24 +813,32 @@ mod tests {
             Err(FreeInputAnswerError::TooLong { length: 201 })
         );
         assert_eq!(
-            MultipleChoiceAnswer::new("x".repeat(201)),
-            Err(MultipleChoiceAnswerError::TooLong { length: 201 })
+            TextChoiceAnswer::new("x".repeat(201)),
+            Err(TextChoiceAnswerError::TooLong { length: 201 })
+        );
+        assert_eq!(
+            ImageCaption::new("x".repeat(201)),
+            Err(ImageCaptionError::TooLong { length: 201 })
         );
     }
 
     #[test]
     fn counts_length_in_characters_not_bytes() {
-        assert!(Prompt::new("あ".repeat(1000)).is_ok());
+        assert!(PromptText::new("あ".repeat(1000)).is_ok());
         assert_eq!(
-            Prompt::new("あ".repeat(1001)),
-            Err(PromptError::TooLong { length: 1001 })
+            PromptText::new("あ".repeat(1001)),
+            Err(PromptTextError::TooLong { length: 1001 })
         );
     }
 
     #[test]
     fn rejects_blank_text() {
         for text in ["", " ", "\t\n", "\u{3000}"] {
-            assert_eq!(Prompt::new(text), Err(PromptError::Blank), "{text:?}");
+            assert_eq!(
+                PromptText::new(text),
+                Err(PromptTextError::Blank),
+                "{text:?}"
+            );
             assert_eq!(
                 CanonicalAnswer::new(text),
                 Err(CanonicalAnswerError::Blank),
@@ -657,8 +850,13 @@ mod tests {
                 "{text:?}"
             );
             assert_eq!(
-                MultipleChoiceAnswer::new(text),
-                Err(MultipleChoiceAnswerError::Blank),
+                TextChoiceAnswer::new(text),
+                Err(TextChoiceAnswerError::Blank),
+                "{text:?}"
+            );
+            assert_eq!(
+                ImageCaption::new(text),
+                Err(ImageCaptionError::Blank),
                 "{text:?}"
             );
         }
@@ -668,8 +866,8 @@ mod tests {
     fn rejects_text_containing_nul() {
         for text in ["\0", "a\0", "\0a", "a\0b"] {
             assert_eq!(
-                Prompt::new(text),
-                Err(PromptError::InvalidCharacter),
+                PromptText::new(text),
+                Err(PromptTextError::InvalidCharacter),
                 "{text:?}"
             );
             assert_eq!(
@@ -683,8 +881,13 @@ mod tests {
                 "{text:?}"
             );
             assert_eq!(
-                MultipleChoiceAnswer::new(text),
-                Err(MultipleChoiceAnswerError::InvalidCharacter),
+                TextChoiceAnswer::new(text),
+                Err(TextChoiceAnswerError::InvalidCharacter),
+                "{text:?}"
+            );
+            assert_eq!(
+                ImageCaption::new(text),
+                Err(ImageCaptionError::InvalidCharacter),
                 "{text:?}"
             );
         }
@@ -693,7 +896,7 @@ mod tests {
     #[test]
     fn preserves_accepted_text_exactly() {
         for text in [" padded ", "Tokyo", "東京", "a\u{301}"] {
-            assert_eq!(Prompt::new(text).unwrap().as_str(), text);
+            assert_eq!(PromptText::new(text).unwrap().as_str(), text);
         }
     }
 
@@ -735,34 +938,95 @@ mod tests {
 
     #[test]
     fn rejects_answer_both_correct_and_wrong() {
-        let tokyo = MultipleChoiceAnswer::new("Tokyo").unwrap();
+        let tokyo = TextChoiceAnswer::new("Tokyo").unwrap();
 
         assert_eq!(
-            MultipleChoice::new(
-                MultipleChoiceRequirement::All,
+            TextChoice::new(
+                ChoiceRequirement::All,
                 BTreeSet1::from_one(tokyo.clone()),
                 BTreeSet::from([tokyo]),
             ),
-            Err(MultipleChoiceError::AnswerBothCorrectAndWrong)
+            Err(TextChoiceError::AnswerBothCorrectAndWrong)
         );
     }
 
     #[test]
-    fn accepts_multiple_choice_without_wrong_answers() {
+    fn accepts_text_choice_without_wrong_answers() {
         assert!(
-            MultipleChoice::new(
-                MultipleChoiceRequirement::All,
-                BTreeSet1::from_one(MultipleChoiceAnswer::new("Tokyo").unwrap()),
+            TextChoice::new(
+                ChoiceRequirement::All,
+                BTreeSet1::from_one(TextChoiceAnswer::new("Tokyo").unwrap()),
                 BTreeSet::new(),
             )
             .is_ok()
         );
     }
 
+    fn media(kind: MediaKind) -> Media {
+        Media::new(MediaId::from_uuid(Uuid::now_v7()), kind)
+    }
+
+    fn image_answer() -> ImageChoiceAnswer {
+        ImageChoiceAnswer::new(media(MediaKind::Image), None).unwrap()
+    }
+
+    #[test]
+    fn rejects_image_choice_answer_without_an_image() {
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            assert_eq!(
+                ImageChoiceAnswer::new(media(kind), None),
+                Err(ImageChoiceAnswerError::NotAnImage),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_more_than_four_image_choice_answers() {
+        let image_choice = |wrong_count: usize| {
+            ImageChoice::new(
+                ChoiceRequirement::One,
+                BTreeSet1::from_one(image_answer()),
+                (0..wrong_count).map(|_| image_answer()).collect(),
+            )
+        };
+
+        assert!(image_choice(3).is_ok());
+        assert_eq!(
+            image_choice(4),
+            Err(ImageChoiceError::TooManyAnswers { count: 5 })
+        );
+    }
+
+    #[test]
+    fn rejects_the_same_image_in_two_answers() {
+        let image = media(MediaKind::Image);
+        let plain = ImageChoiceAnswer::new(image, None).unwrap();
+        let labelled =
+            ImageChoiceAnswer::new(image, Some(ImageCaption::new("Tokyo").unwrap())).unwrap();
+
+        assert_eq!(
+            ImageChoice::new(
+                ChoiceRequirement::All,
+                BTreeSet1::from_head_and_tail(plain.clone(), [labelled]),
+                BTreeSet::new(),
+            ),
+            Err(ImageChoiceError::DuplicateImage)
+        );
+        assert_eq!(
+            ImageChoice::new(
+                ChoiceRequirement::One,
+                BTreeSet1::from_one(plain.clone()),
+                BTreeSet::from([plain]),
+            ),
+            Err(ImageChoiceError::DuplicateImage)
+        );
+    }
+
     #[test]
     fn creates_quiz_with_one_mode_of_each_kind() {
         let quiz = new_quiz(
-            Vec1::from_head_and_tail(free_input(), [multiple_choice()]),
+            Vec1::from_head_and_tail(free_input(), [text_choice()]),
             tags(10),
         )
         .unwrap();
@@ -773,8 +1037,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_response_mode_kind() {
-        let response_modes =
-            Vec1::from_head_and_tail(free_input(), [multiple_choice(), free_input()]);
+        let response_modes = Vec1::from_head_and_tail(free_input(), [text_choice(), free_input()]);
 
         assert_eq!(
             new_quiz(response_modes, tags(0)),
@@ -804,7 +1067,10 @@ mod tests {
             Quiz::from_persistence(
                 QuizId::new(),
                 UserId::from_uuid(Uuid::now_v7()),
-                Prompt::new("What is the capital of Japan?").unwrap(),
+                Prompt::new(
+                    PromptText::new("What is the capital of Japan?").unwrap(),
+                    None,
+                ),
                 CanonicalAnswer::new("Tokyo").unwrap(),
                 response_modes,
                 Language::Eng,
@@ -846,13 +1112,16 @@ mod tests {
     fn accepted_change_replaces_content() {
         let mut quiz = new_quiz(Vec1::from_one(free_input()), tags(1)).unwrap();
 
-        quiz.change_prompt(Prompt::new("Capital of Japan?").unwrap());
-        quiz.change_response_modes(Vec1::from_one(multiple_choice()))
+        quiz.change_prompt(Prompt::new(
+            PromptText::new("Capital of Japan?").unwrap(),
+            None,
+        ));
+        quiz.change_response_modes(Vec1::from_one(text_choice()))
             .unwrap();
         quiz.change_tags(tags(3)).unwrap();
 
-        assert_eq!(quiz.prompt().as_str(), "Capital of Japan?");
-        assert_eq!(quiz.response_modes().as_slice(), [multiple_choice()]);
+        assert_eq!(quiz.prompt().text().as_str(), "Capital of Japan?");
+        assert_eq!(quiz.response_modes().as_slice(), [text_choice()]);
         assert_eq!(quiz.tags().len(), 3);
     }
 }

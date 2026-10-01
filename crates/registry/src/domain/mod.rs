@@ -1,13 +1,16 @@
+mod media;
 mod quiz;
 mod quiz_list;
 mod tag;
 mod user;
 
+pub(super) use media::{Media, MediaId, MediaKind};
 pub(super) use quiz::{
     CanonicalAnswer, CanonicalAnswerError, Character, CharacterChoice, CharacterChoiceError,
-    CharacterChoices, CharacterError, FreeInput, FreeInputAnswer, FreeInputAnswerError,
-    MultipleChoice, MultipleChoiceAnswer, MultipleChoiceAnswerError, MultipleChoiceError,
-    MultipleChoiceRequirement, Prompt, PromptError, Quiz, QuizError, QuizId, ResponseMode,
+    CharacterChoices, CharacterError, ChoiceRequirement, FreeInput, FreeInputAnswer,
+    FreeInputAnswerError, ImageCaption, ImageCaptionError, ImageChoice, ImageChoiceAnswer,
+    ImageChoiceError, Prompt, PromptText, PromptTextError, Quiz, QuizError, QuizId, ResponseMode,
+    TextChoice, TextChoiceAnswer, TextChoiceAnswerError, TextChoiceError,
 };
 pub(super) use quiz_list::{
     QuizList, QuizListDescription, QuizListDescriptionError, QuizListError, QuizListId,
