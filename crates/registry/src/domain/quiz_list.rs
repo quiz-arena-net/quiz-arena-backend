@@ -109,13 +109,15 @@ pub(crate) enum QuizListDescriptionError {
     InvalidCharacter,
 }
 
-/// Identifies one version of a quiz list's ordering.
+/// Identifies one version of a quiz list's entries.
 ///
-/// Assigned whenever the quizzes or their order change.
+/// Assigned whenever the quizzes or their order change, so it tells versions
+/// apart. Two entries with the same quizzes in the same order but different
+/// identifiers are different versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct QuizListVersionId(Uuid);
+pub(crate) struct QuizListEntriesId(Uuid);
 
-impl QuizListVersionId {
+impl QuizListEntriesId {
     /// Generates a new identifier.
     pub(crate) fn new() -> Self {
         Self(Uuid::now_v7())
@@ -128,6 +130,59 @@ impl QuizListVersionId {
     pub(crate) fn as_uuid(&self) -> Uuid {
         self.0
     }
+}
+
+/// One version of the quizzes in a quiz list, in order.
+///
+/// Guaranteed to hold at most 100 quizzes with no quiz twice. May be empty and
+/// may refer to quizzes that no longer exist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct QuizListEntries {
+    /// Identifies this version.
+    id: QuizListEntriesId,
+
+    /// The quizzes, in order.
+    quiz_ids: Vec<QuizId>,
+}
+
+impl QuizListEntries {
+    pub(crate) const MAX_QUIZZES: usize = 100;
+
+    pub(crate) fn new(
+        id: QuizListEntriesId,
+        quiz_ids: Vec<QuizId>,
+    ) -> Result<Self, QuizListEntriesError> {
+        let count = quiz_ids.len();
+        if count > Self::MAX_QUIZZES {
+            return Err(QuizListEntriesError::TooManyQuizzes { count });
+        }
+        let mut seen = BTreeSet::new();
+        for quiz_id in &quiz_ids {
+            if !seen.insert(quiz_id) {
+                return Err(QuizListEntriesError::DuplicateQuiz);
+            }
+        }
+        Ok(Self { id, quiz_ids })
+    }
+
+    pub(crate) fn id(&self) -> QuizListEntriesId {
+        self.id
+    }
+
+    pub(crate) fn quiz_ids(&self) -> &[QuizId] {
+        &self.quiz_ids
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum QuizListEntriesError {
+    #[error("a quiz list must not contain the same quiz twice")]
+    DuplicateQuiz,
+    #[error(
+        "a quiz list must have at most {} quizzes, got {count}",
+        QuizListEntries::MAX_QUIZZES
+    )]
+    TooManyQuizzes { count: usize },
 }
 
 /// The audience of a quiz list.
@@ -158,9 +213,9 @@ pub(crate) enum Visibility {
 /// runs again when a session builds its lineup. An inclusion that is no longer
 /// permitted stays in the list and is skipped.
 ///
-/// A list can contain up to 100 quizzes, with no duplicates, and up to 10 tags.
-/// It does not check whether its quizzes still exist. Edit permissions are
-/// checked by [`QuizList::editable_by`].
+/// The entries are versioned, see [`QuizListEntries`]. The title, description,
+/// visibility and tags are not. A list can carry up to 10 tags. Edit
+/// permissions are checked by [`QuizList::editable_by`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuizList {
     /// The unique identifier of the list.
@@ -178,37 +233,15 @@ pub(crate) struct QuizList {
     /// Who can find or view the list.
     visibility: Visibility,
 
-    /// The version of the quiz ordering.
-    ///
-    /// Changes only together with `quiz_ids`.
-    version: QuizListVersionId,
-
-    /// The quizzes in this list, in order.
-    ///
-    /// May be empty or contain IDs of deleted quizzes.
-    quiz_ids: Vec<QuizId>,
+    /// The quizzes in this list at the current version.
+    entries: QuizListEntries,
 
     /// Tags associated with the list.
     tags: BTreeSet<Tag>,
 }
 
 impl QuizList {
-    pub(crate) const MAX_QUIZZES: usize = 100;
     pub(crate) const MAX_TAGS: usize = 10;
-
-    fn check_quiz_ids(quiz_ids: &[QuizId]) -> Result<(), QuizListError> {
-        let count = quiz_ids.len();
-        if count > Self::MAX_QUIZZES {
-            return Err(QuizListError::TooManyQuizzes { count });
-        }
-        let mut seen = BTreeSet::new();
-        for quiz_id in quiz_ids {
-            if !seen.insert(quiz_id) {
-                return Err(QuizListError::DuplicateQuiz);
-            }
-        }
-        Ok(())
-    }
 
     fn check_tags(tags: &BTreeSet<Tag>) -> Result<(), QuizListError> {
         let count = tags.len();
@@ -218,16 +251,15 @@ impl QuizList {
         Ok(())
     }
 
-    /// Creates a new quiz list with a freshly generated identifier and version.
+    /// Creates a new quiz list with a freshly generated identifier.
     pub(crate) fn new(
         owner: UserId,
         title: QuizListTitle,
         description: Option<QuizListDescription>,
         visibility: Visibility,
-        quiz_ids: Vec<QuizId>,
+        entries: QuizListEntries,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizListError> {
-        Self::check_quiz_ids(&quiz_ids)?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id: QuizListId::new(),
@@ -235,8 +267,7 @@ impl QuizList {
             title,
             description,
             visibility,
-            version: QuizListVersionId::new(),
-            quiz_ids,
+            entries,
             tags,
         })
     }
@@ -246,18 +277,15 @@ impl QuizList {
     /// For repository implementations only. Checks the aggregate invariants,
     /// which hold for every quiz list however it was obtained. Restrictions
     /// that apply only when creating a quiz list are not rechecked here.
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn from_persistence(
         id: QuizListId,
         owner: UserId,
         title: QuizListTitle,
         description: Option<QuizListDescription>,
         visibility: Visibility,
-        version: QuizListVersionId,
-        quiz_ids: Vec<QuizId>,
+        entries: QuizListEntries,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizListError> {
-        Self::check_quiz_ids(&quiz_ids)?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id,
@@ -265,8 +293,7 @@ impl QuizList {
             title,
             description,
             visibility,
-            version,
-            quiz_ids,
+            entries,
             tags,
         })
     }
@@ -291,12 +318,8 @@ impl QuizList {
         self.visibility
     }
 
-    pub(crate) fn version(&self) -> QuizListVersionId {
-        self.version
-    }
-
-    pub(crate) fn quiz_ids(&self) -> &[QuizId] {
-        &self.quiz_ids
+    pub(crate) fn entries(&self) -> &QuizListEntries {
+        &self.entries
     }
 
     pub(crate) fn tags(&self) -> &BTreeSet<Tag> {
@@ -326,7 +349,7 @@ impl QuizList {
 
     /// Inserts a quiz at `position`, or appends it when `position` is `None`.
     ///
-    /// Assigns a new version.
+    /// Replaces the entries with a new version.
     pub(crate) fn add_quiz(
         &mut self,
         quiz_id: QuizId,
@@ -338,7 +361,7 @@ impl QuizList {
 
     /// Removes a quiz from the list.
     ///
-    /// Assigns a new version.
+    /// Replaces the entries with a new version.
     pub(crate) fn remove_quiz(&mut self, quiz_id: QuizId) -> Result<(), RemoveQuizError> {
         let _ = quiz_id;
         todo!()
@@ -346,8 +369,8 @@ impl QuizList {
 
     /// Replaces the order of the quizzes.
     ///
-    /// Assigns a new version. `order` must be a permutation of the current
-    /// quizzes.
+    /// Replaces the entries with a new version. `order` must be a permutation
+    /// of the current quizzes.
     pub(crate) fn reorder(&mut self, order: Vec<QuizId>) -> Result<(), ReorderError> {
         let _ = order;
         todo!()
@@ -366,13 +389,6 @@ impl QuizList {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum QuizListError {
-    #[error("a quiz list must not contain the same quiz twice")]
-    DuplicateQuiz,
-    #[error(
-        "a quiz list must have at most {} quizzes, got {count}",
-        QuizList::MAX_QUIZZES
-    )]
-    TooManyQuizzes { count: usize },
     #[error(
         "a quiz list must have at most {} tags, got {count}",
         QuizList::MAX_TAGS
@@ -386,7 +402,7 @@ pub(crate) enum AddQuizError {
     DuplicateQuiz,
     #[error(
         "a quiz list must have at most {} quizzes, got {count}",
-        QuizList::MAX_QUIZZES
+        QuizListEntries::MAX_QUIZZES
     )]
     TooManyQuizzes { count: usize },
     #[error("position {position} is beyond the end of the quiz list")]
@@ -422,6 +438,10 @@ mod tests {
         (0..count).map(|_| QuizId::new()).collect()
     }
 
+    fn entries(quiz_ids: Vec<QuizId>) -> Result<QuizListEntries, QuizListEntriesError> {
+        QuizListEntries::new(QuizListEntriesId::new(), quiz_ids)
+    }
+
     fn tags(count: usize) -> BTreeSet<Tag> {
         (0..count)
             .map(|index| Tag::new(format!("tag{index}")).unwrap())
@@ -429,7 +449,7 @@ mod tests {
     }
 
     fn new_quiz_list(
-        quiz_ids: Vec<QuizId>,
+        entries: QuizListEntries,
         tags: BTreeSet<Tag>,
     ) -> Result<QuizList, QuizListError> {
         QuizList::new(
@@ -437,7 +457,7 @@ mod tests {
             QuizListTitle::new("Capitals").unwrap(),
             None,
             Visibility::Private,
-            quiz_ids,
+            entries,
             tags,
         )
     }
@@ -493,18 +513,17 @@ mod tests {
     }
 
     #[test]
-    fn creates_empty_quiz_list() {
-        let quiz_list = new_quiz_list(Vec::new(), tags(0)).unwrap();
+    fn creates_empty_entries() {
+        let entries = entries(Vec::new()).unwrap();
 
-        assert!(quiz_list.quiz_ids().is_empty());
+        assert!(entries.quiz_ids().is_empty());
     }
 
     #[test]
-    fn creates_quiz_list_at_the_limits() {
-        let quiz_list = new_quiz_list(quiz_ids(100), tags(10)).unwrap();
+    fn creates_entries_at_the_limit() {
+        let entries = entries(quiz_ids(100)).unwrap();
 
-        assert_eq!(quiz_list.quiz_ids().len(), 100);
-        assert_eq!(quiz_list.tags().len(), 10);
+        assert_eq!(entries.quiz_ids().len(), 100);
     }
 
     #[test]
@@ -512,61 +531,58 @@ mod tests {
         let quiz_id = QuizId::new();
 
         assert_eq!(
-            new_quiz_list(vec![quiz_id, QuizId::new(), quiz_id], tags(0)),
-            Err(QuizListError::DuplicateQuiz)
+            entries(vec![quiz_id, QuizId::new(), quiz_id]),
+            Err(QuizListEntriesError::DuplicateQuiz)
         );
     }
 
     #[test]
     fn rejects_more_than_a_hundred_quizzes() {
         assert_eq!(
-            new_quiz_list(quiz_ids(101), tags(0)),
-            Err(QuizListError::TooManyQuizzes { count: 101 })
+            entries(quiz_ids(101)),
+            Err(QuizListEntriesError::TooManyQuizzes { count: 101 })
         );
+    }
+
+    #[test]
+    fn creates_quiz_list_at_the_tag_limit() {
+        let quiz_list = new_quiz_list(entries(Vec::new()).unwrap(), tags(10)).unwrap();
+
+        assert_eq!(quiz_list.tags().len(), 10);
     }
 
     #[test]
     fn rejects_more_than_ten_tags() {
         assert_eq!(
-            new_quiz_list(Vec::new(), tags(11)),
+            new_quiz_list(entries(Vec::new()).unwrap(), tags(11)),
             Err(QuizListError::TooManyTags { count: 11 })
         );
     }
 
     #[test]
     fn rehydration_checks_invariants() {
-        let rehydrate = |quiz_ids, tags| {
+        let rehydrate = |tags| {
             QuizList::from_persistence(
                 QuizListId::new(),
                 UserId::from_uuid(Uuid::now_v7()),
                 QuizListTitle::new("Capitals").unwrap(),
                 None,
                 Visibility::Private,
-                QuizListVersionId::new(),
-                quiz_ids,
+                entries(Vec::new()).unwrap(),
                 tags,
             )
         };
-        let quiz_id = QuizId::new();
 
-        assert!(rehydrate(quiz_ids(100), tags(10)).is_ok());
+        assert!(rehydrate(tags(10)).is_ok());
         assert_eq!(
-            rehydrate(vec![quiz_id, quiz_id], tags(0)),
-            Err(QuizListError::DuplicateQuiz)
-        );
-        assert_eq!(
-            rehydrate(quiz_ids(101), tags(0)),
-            Err(QuizListError::TooManyQuizzes { count: 101 })
-        );
-        assert_eq!(
-            rehydrate(Vec::new(), tags(11)),
+            rehydrate(tags(11)),
             Err(QuizListError::TooManyTags { count: 11 })
         );
     }
 
     #[test]
     fn rejected_tag_change_leaves_quiz_list_unchanged() {
-        let mut quiz_list = new_quiz_list(quiz_ids(1), tags(1)).unwrap();
+        let mut quiz_list = new_quiz_list(entries(quiz_ids(1)).unwrap(), tags(1)).unwrap();
         let before = quiz_list.clone();
 
         assert_eq!(
