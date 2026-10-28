@@ -10,7 +10,7 @@ mod user;
 pub(super) use media::{Media, MediaId, MediaKind};
 pub(super) use quiz::{
     CanonicalAnswer, CanonicalAnswerError, Prompt, PromptText, PromptTextError, Quiz, QuizContent,
-    QuizContentError, QuizId, QuizVersionId,
+    QuizContentError, QuizContentId, QuizId,
 };
 pub(super) use quiz_draft::{
     QuizDraft, QuizDraftContent, QuizDraftContentError, QuizDraftValidationError,

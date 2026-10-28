@@ -31,13 +31,14 @@ impl QuizId {
     }
 }
 
-/// Identifies one published version of a quiz.
+/// Identifies one published version of a quiz's content.
 ///
-/// Assigned on every publication.
+/// Assigned on every publication, so it also serves as a version identifier,
+/// distinguishing versions even when their content is identical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct QuizVersionId(Uuid);
+pub(crate) struct QuizContentId(Uuid);
 
-impl QuizVersionId {
+impl QuizContentId {
     /// Generates a new identifier.
     pub(crate) fn new() -> Self {
         Self(Uuid::now_v7())
@@ -165,13 +166,16 @@ pub(crate) enum CanonicalAnswerError {
     InvalidCharacter,
 }
 
-/// The published content of a quiz.
+/// One published version of a quiz's content.
 ///
 /// Guaranteed to support at most one response mode of each kind and to carry at
 /// most 10 tags. Session-specific behavior, such as how free-input responses
 /// are judged, is configured outside the aggregate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuizContent {
+    /// Identifies this version.
+    id: QuizContentId,
+
     /// The question presented to players.
     prompt: Prompt,
 
@@ -194,6 +198,7 @@ impl QuizContent {
     pub(crate) const MAX_TAGS: usize = 10;
 
     pub(crate) fn new(
+        id: QuizContentId,
         prompt: Prompt,
         canonical_answer: CanonicalAnswer,
         response_modes: Vec1<ResponseMode>,
@@ -213,12 +218,17 @@ impl QuizContent {
             return Err(QuizContentError::TooManyTags { count });
         }
         Ok(Self {
+            id,
             prompt,
             canonical_answer,
             response_modes,
             language,
             tags,
         })
+    }
+
+    pub(crate) fn id(&self) -> QuizContentId {
+        self.id
     }
 
     pub(crate) fn prompt(&self) -> &Prompt {
@@ -250,10 +260,10 @@ pub(crate) enum QuizContentError {
     TooManyTags { count: usize },
 }
 
-/// A published quiz at a specific version.
+/// A published quiz at a specific version of its content.
 ///
-/// Each revision updates the content and version, but keeps the same quiz ID.
-/// Statistics use the quiz ID, regardless of version.
+/// Each revision replaces the content, but keeps the same quiz ID. Statistics
+/// use the quiz ID, regardless of version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Quiz {
     /// The unique identifier of this quiz.
@@ -262,21 +272,16 @@ pub(crate) struct Quiz {
     /// The author who created this quiz.
     author: UserId,
 
-    /// The version this snapshot represents.
-    ///
-    /// Changes only together with `content`, through [`Quiz::revise`].
-    version: QuizVersionId,
-
-    /// The content of this version.
+    /// The content at the version this snapshot represents.
     content: QuizContent,
 }
 
 impl Quiz {
     /// Publishes a quiz for the first time.
     ///
-    /// Consumes the draft and assigns the first version. Revising an already
-    /// published quiz goes through [`Quiz::revise`] instead. The quiz's use
-    /// policy is created alongside by the application layer.
+    /// Consumes the draft and creates the first content version. Revising an
+    /// already published quiz goes through [`Quiz::revise`] instead. The quiz's
+    /// use policy is created alongside by the application layer.
     pub(crate) fn publish(draft: QuizDraft) -> Result<Self, Vec1<QuizDraftValidationError>> {
         let _ = draft;
         todo!()
@@ -286,16 +291,10 @@ impl Quiz {
     ///
     /// For repository implementations only. The aggregate invariants are
     /// carried by [`QuizContent`], so this cannot fail.
-    pub(crate) fn from_persistence(
-        id: QuizId,
-        author: UserId,
-        version: QuizVersionId,
-        content: QuizContent,
-    ) -> Self {
+    pub(crate) fn from_persistence(id: QuizId, author: UserId, content: QuizContent) -> Self {
         Self {
             id,
             author,
-            version,
             content,
         }
     }
@@ -306,10 +305,6 @@ impl Quiz {
 
     pub(crate) fn author(&self) -> UserId {
         self.author
-    }
-
-    pub(crate) fn version(&self) -> QuizVersionId {
-        self.version
     }
 
     pub(crate) fn content(&self) -> &QuizContent {
@@ -327,7 +322,7 @@ impl Quiz {
 
     /// Publishes the draft as the next version of this quiz.
     ///
-    /// Consumes the draft, replaces the content and assigns a new version. The
+    /// Consumes the draft and replaces the content with a new version. The
     /// draft must belong to this quiz.
     pub(crate) fn revise(
         &mut self,
@@ -375,6 +370,7 @@ mod tests {
         tags: BTreeSet<Tag>,
     ) -> Result<QuizContent, QuizContentError> {
         QuizContent::new(
+            QuizContentId::new(),
             Prompt::new(
                 PromptText::new("What is the capital of Japan?").unwrap(),
                 None,
