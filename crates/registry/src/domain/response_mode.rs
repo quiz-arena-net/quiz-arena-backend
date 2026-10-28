@@ -294,9 +294,8 @@ pub(crate) enum ImageCaptionError {
 
 /// An answer presented as an image in an [`ImageChoice`] response.
 ///
-/// Answers are told apart by their image.
-///
-/// Guaranteed to hold media of the image kind.
+/// Guaranteed to hold media of the image kind. Within an [`ImageChoice`] no two
+/// answers share an image.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ImageChoiceAnswer {
     /// The image shown for this answer.
