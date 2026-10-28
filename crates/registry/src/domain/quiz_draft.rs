@@ -19,27 +19,26 @@ use super::{
 /// constraints are checked by [`QuizDraftContent::validate`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuizDraftContent {
-    /// The question text. May be blank.
+    /// The question text.
     prompt_text: String,
 
     /// Media presented alongside the question text.
     prompt_media: Option<Media>,
 
-    /// The canonical answer. May be blank.
+    /// The canonical answer.
     canonical_answer: String,
 
-    /// Response modes. May be empty or contain duplicates.
+    /// Response modes.
     response_modes: Vec<DraftResponseMode>,
 
     /// The language of the quiz.
     language: Language,
 
-    /// Tags. The limit is not enforced here.
+    /// Tags.
     tags: BTreeSet<Tag>,
 }
 
 impl QuizDraftContent {
-    /// Fails only on text length limits and NUL, see [`QuizDraftContentError`].
     pub(crate) fn new(
         prompt_text: impl Into<String>,
         prompt_media: Option<Media>,

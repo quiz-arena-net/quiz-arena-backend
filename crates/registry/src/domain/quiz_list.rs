@@ -111,9 +111,9 @@ pub(crate) enum QuizListDescriptionError {
 
 /// Identifies one version of a quiz list's entries.
 ///
-/// Assigned whenever the quizzes or their order change, so it tells versions
-/// apart. Two entries with the same quizzes in the same order but different
-/// identifiers are different versions.
+/// Assigned whenever the quizzes or their order change, so it also serves as a
+/// version identifier, distinguishing versions even when the entries are
+/// identical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct QuizListEntriesId(Uuid);
 
@@ -192,13 +192,13 @@ pub(crate) enum QuizListEntriesError {
 /// [`InclusionPolicy`](super::quiz::InclusionPolicy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum Visibility {
-    /// Anyone can find and view the list.
+    /// Anyone can reach the list.
     Public,
 
-    /// Anyone with the link can view the list.
+    /// Anyone with the link can reach the list.
     Unlisted,
 
-    /// Only the owner can view the list.
+    /// Only the owner can reach the list.
     Private,
 }
 
@@ -218,25 +218,25 @@ pub(crate) enum Visibility {
 /// permissions are checked by [`QuizList::editable_by`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuizList {
-    /// The unique identifier of the list.
+    /// The unique identifier of this list.
     id: QuizListId,
 
-    /// The user who owns the list.
+    /// The user who owns this list.
     owner: UserId,
 
-    /// The title of the list.
+    /// The title of this list.
     title: QuizListTitle,
 
-    /// An optional description of the list.
+    /// An optional description of this list.
     description: Option<QuizListDescription>,
 
-    /// Who can find or view the list.
+    /// The audience of this list.
     visibility: Visibility,
 
     /// The quizzes in this list at the current version.
     entries: QuizListEntries,
 
-    /// Tags associated with the list.
+    /// Tags associated with this list.
     tags: BTreeSet<Tag>,
 }
 
@@ -326,9 +326,9 @@ impl QuizList {
         &self.tags
     }
 
-    /// Whether `user` may edit this quiz list.
+    /// Returns whether `user` may edit this quiz list.
     ///
-    /// Only the owner may.
+    /// Only the owner may edit.
     pub(crate) fn editable_by(&self, user: UserId) -> bool {
         let _ = user;
         todo!()
