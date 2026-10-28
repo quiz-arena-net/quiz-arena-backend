@@ -6,8 +6,7 @@ use uuid::Uuid;
 
 use super::{
     media::Media,
-    quiz_draft::{QuizDraftContent, ValidationError},
-    response_mode::ResponseMode,
+    response_mode::{DraftResponseMode, ImageChoice, ResponseMode, TextChoice},
     tag::Tag,
     user::UserId,
 };
@@ -30,29 +29,6 @@ impl QuizId {
         self.0
     }
 }
-
-/// Identifies one published version of a quiz's content.
-///
-/// Assigned on every publication, so it also serves as a version identifier,
-/// distinguishing versions even when their content is identical.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct QuizContentId(Uuid);
-
-impl QuizContentId {
-    /// Generates a new identifier.
-    pub(crate) fn new() -> Self {
-        Self(Uuid::now_v7())
-    }
-
-    pub(crate) fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    pub(crate) fn as_uuid(&self) -> Uuid {
-        self.0
-    }
-}
-
 /// The question text presented to players.
 ///
 /// Guaranteed to be 1 to 1000 characters, not only whitespace, and free of NUL.
@@ -164,6 +140,174 @@ pub(crate) enum CanonicalAnswerError {
     TooLong { length: usize },
     #[error("canonical answer must not contain NUL")]
     InvalidCharacter,
+}
+
+/// A [`QuizContent`] that may still be incomplete.
+///
+/// Text may be blank, response modes may be missing or duplicated, and the tag
+/// limit is not enforced.
+///
+/// Text length limits and NUL characters are checked at construction. All other
+/// constraints are checked by [`DraftQuizContent::validate`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DraftQuizContent {
+    /// The question text.
+    prompt_text: String,
+
+    /// Media presented alongside the question text.
+    prompt_media: Option<Media>,
+
+    /// The canonical answer.
+    canonical_answer: String,
+
+    /// Response modes.
+    response_modes: Vec<DraftResponseMode>,
+
+    /// The language of the quiz.
+    language: Language,
+
+    /// Tags.
+    tags: BTreeSet<Tag>,
+}
+
+impl DraftQuizContent {
+    pub(crate) fn new(
+        prompt_text: impl Into<String>,
+        prompt_media: Option<Media>,
+        canonical_answer: impl Into<String>,
+        response_modes: Vec<DraftResponseMode>,
+        language: Language,
+        tags: BTreeSet<Tag>,
+    ) -> Result<Self, DraftQuizContentError> {
+        let _ = (
+            prompt_text.into(),
+            prompt_media,
+            canonical_answer.into(),
+            response_modes,
+            language,
+            tags,
+        );
+        todo!()
+    }
+
+    pub(crate) fn prompt_text(&self) -> &str {
+        &self.prompt_text
+    }
+
+    pub(crate) fn prompt_media(&self) -> Option<Media> {
+        self.prompt_media
+    }
+
+    pub(crate) fn canonical_answer(&self) -> &str {
+        &self.canonical_answer
+    }
+
+    pub(crate) fn response_modes(&self) -> &[DraftResponseMode] {
+        &self.response_modes
+    }
+
+    pub(crate) fn language(&self) -> Language {
+        self.language
+    }
+
+    pub(crate) fn tags(&self) -> &BTreeSet<Tag> {
+        &self.tags
+    }
+
+    /// Validates all fields and returns content ready for publication.
+    ///
+    /// Returns all violations instead of stopping at the first one.
+    pub(crate) fn validate(&self) -> Result<QuizContent, Vec1<ValidationError>> {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum DraftQuizContentError {
+    #[error(
+        "prompt text must be at most {} characters, got {length}",
+        PromptText::MAX_LENGTH
+    )]
+    PromptTextTooLong { length: usize },
+    #[error("prompt text must not contain NUL")]
+    PromptTextInvalidCharacter,
+    #[error(
+        "canonical answer must be at most {} characters, got {length}",
+        CanonicalAnswer::MAX_LENGTH
+    )]
+    CanonicalAnswerTooLong { length: usize },
+    #[error("canonical answer must not contain NUL")]
+    CanonicalAnswerInvalidCharacter,
+}
+
+/// A reason a draft cannot be published.
+///
+/// Positions of character choices are zero-based indexes into
+/// [`DraftCharacterChoices::choices`](super::response_mode::DraftCharacterChoices::choices).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum ValidationError {
+    #[error("prompt text must not be empty or only whitespace")]
+    PromptTextBlank,
+    #[error("canonical answer must not be empty or only whitespace")]
+    CanonicalAnswerBlank,
+    #[error("a quiz must support at least one response mode")]
+    NoResponseMode,
+    #[error("a quiz must not support the same kind of response mode twice")]
+    DuplicateResponseMode,
+    #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
+    TooManyTags { count: usize },
+    #[error("a free input must have at least one expected answer")]
+    FreeInputNoExpectedAnswer,
+    #[error("a text choice must have at least one correct answer")]
+    TextChoiceNoCorrectAnswer,
+    #[error("a text choice answer must not be both correct and wrong")]
+    TextChoiceAnswerBothCorrectAndWrong,
+    #[error(
+        "a text choice must have at most {} answers, got {count}",
+        TextChoice::MAX_ANSWERS
+    )]
+    TextChoiceTooManyAnswers { count: usize },
+    #[error("an image choice must have at least one correct answer")]
+    ImageChoiceNoCorrectAnswer,
+    #[error("an image must not appear in more than one image choice answer")]
+    ImageChoiceDuplicateImage,
+    #[error(
+        "an image choice must have at most {} answers, got {count}",
+        ImageChoice::MAX_ANSWERS
+    )]
+    ImageChoiceTooManyAnswers { count: usize },
+    #[error("character choices must have at least one position")]
+    CharacterChoicesNoPosition,
+    #[error("character choice at position {position} must have a correct character")]
+    CharacterChoiceNoCorrectCharacter { position: usize },
+    #[error("character choice at position {position} must have at least one wrong character")]
+    CharacterChoiceNoWrongCharacter { position: usize },
+    #[error(
+        "character choice at position {position} must not have its correct character among the wrong ones"
+    )]
+    CharacterChoiceCorrectChoiceAmongWrongChoices { position: usize },
+}
+
+/// Identifies one published version of a quiz's content.
+///
+/// Assigned on every publication, so it also serves as a version identifier,
+/// distinguishing versions even when their content is identical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct QuizContentId(Uuid);
+
+impl QuizContentId {
+    /// Generates a new identifier.
+    pub(crate) fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+
+    pub(crate) fn from_uuid(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+
+    pub(crate) fn as_uuid(&self) -> Uuid {
+        self.0
+    }
 }
 
 /// One published version of a quiz's content.
@@ -284,7 +428,7 @@ pub(crate) enum QuizState {
     /// Never published. Only a draft exists.
     Unpublished {
         /// The content being worked on.
-        draft: QuizDraftContent,
+        draft: DraftQuizContent,
     },
 
     /// Published at least once.
@@ -293,7 +437,7 @@ pub(crate) enum QuizState {
         content: QuizContent,
 
         /// The content being worked on for the next version.
-        draft: Option<QuizDraftContent>,
+        draft: Option<DraftQuizContent>,
     },
 }
 
@@ -327,7 +471,7 @@ impl Quiz {
     /// Starts a new, unpublished quiz with a freshly generated identifier.
     pub(crate) fn new(
         author: UserId,
-        draft: QuizDraftContent,
+        draft: DraftQuizContent,
         inclusion_policy: InclusionPolicy,
     ) -> Self {
         Self {
@@ -391,7 +535,7 @@ impl Quiz {
     }
 
     /// Replaces the draft. Starts one if the quiz has none.
-    pub(crate) fn edit_draft(&mut self, draft: QuizDraftContent) {
+    pub(crate) fn edit_draft(&mut self, draft: DraftQuizContent) {
         let _ = draft;
         todo!()
     }
