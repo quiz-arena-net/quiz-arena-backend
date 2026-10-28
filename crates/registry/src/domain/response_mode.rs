@@ -71,6 +71,8 @@ impl DraftFreeInput {
 }
 
 /// The player provides an unrestricted textual response.
+///
+/// Guaranteed to hold at most 20 expected answers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct FreeInput {
     /// Reference answers for judging.
@@ -80,13 +82,30 @@ pub(crate) struct FreeInput {
 }
 
 impl FreeInput {
-    pub(crate) fn new(expected_answers: BTreeSet1<FreeInputAnswer>) -> Self {
-        Self { expected_answers }
+    pub(crate) const MAX_EXPECTED_ANSWERS: usize = 20;
+
+    pub(crate) fn new(
+        expected_answers: BTreeSet1<FreeInputAnswer>,
+    ) -> Result<Self, FreeInputError> {
+        let count = expected_answers.len().get();
+        if count > Self::MAX_EXPECTED_ANSWERS {
+            return Err(FreeInputError::TooManyExpectedAnswers { count });
+        }
+        Ok(Self { expected_answers })
     }
 
     pub(crate) fn expected_answers(&self) -> &BTreeSet1<FreeInputAnswer> {
         &self.expected_answers
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum FreeInputError {
+    #[error(
+        "a free input must have at most {} expected answers, got {count}",
+        FreeInput::MAX_EXPECTED_ANSWERS
+    )]
+    TooManyExpectedAnswers { count: usize },
 }
 
 /// Specifies how many correct choices a player must select in a [`TextChoice`]
@@ -502,7 +521,8 @@ impl DraftCharacterChoice {
 /// The choices presented for one position in a character-by-character response.
 ///
 /// Exactly one choice is correct. The remaining choices are distractors, and
-/// none of them equals the correct one.
+/// none of them equals the correct one. Guaranteed to hold at most 9 wrong
+/// choices.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct CharacterChoice {
     /// The correct character for this position.
@@ -513,12 +533,18 @@ pub(crate) struct CharacterChoice {
 }
 
 impl CharacterChoice {
+    pub(crate) const MAX_WRONG_CHOICES: usize = 9;
+
     pub(crate) fn new(
         correct_choice: Character,
         wrong_choices: BTreeSet1<Character>,
     ) -> Result<Self, CharacterChoiceError> {
         if wrong_choices.contains(&correct_choice) {
             return Err(CharacterChoiceError::CorrectChoiceAmongWrongChoices);
+        }
+        let count = wrong_choices.len().get();
+        if count > Self::MAX_WRONG_CHOICES {
+            return Err(CharacterChoiceError::TooManyWrongChoices { count });
         }
         Ok(Self {
             correct_choice,
@@ -539,6 +565,11 @@ impl CharacterChoice {
 pub(crate) enum CharacterChoiceError {
     #[error("the correct character must not also be a wrong choice")]
     CorrectChoiceAmongWrongChoices,
+    #[error(
+        "a character choice must have at most {} wrong choices, got {count}",
+        CharacterChoice::MAX_WRONG_CHOICES
+    )]
+    TooManyWrongChoices { count: usize },
 }
 
 /// A [`CharacterChoices`] that may still be incomplete.
@@ -565,6 +596,8 @@ impl DraftCharacterChoices {
 
 /// The player constructs the answer one character at a time by selecting from a
 /// set of candidate characters at each position.
+///
+/// Guaranteed to hold at most 50 positions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct CharacterChoices {
     /// The choices for each position.
@@ -575,13 +608,28 @@ pub(crate) struct CharacterChoices {
 }
 
 impl CharacterChoices {
-    pub(crate) fn new(choices: Vec1<CharacterChoice>) -> Self {
-        Self { choices }
+    pub(crate) const MAX_POSITIONS: usize = 50;
+
+    pub(crate) fn new(choices: Vec1<CharacterChoice>) -> Result<Self, CharacterChoicesError> {
+        let count = choices.len().get();
+        if count > Self::MAX_POSITIONS {
+            return Err(CharacterChoicesError::TooManyPositions { count });
+        }
+        Ok(Self { choices })
     }
 
     pub(crate) fn choices(&self) -> &Vec1<CharacterChoice> {
         &self.choices
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum CharacterChoicesError {
+    #[error(
+        "character choices must have at most {} positions, got {count}",
+        CharacterChoices::MAX_POSITIONS
+    )]
+    TooManyPositions { count: usize },
 }
 
 /// A [`ResponseMode`] that may still be incomplete.
@@ -719,6 +767,59 @@ mod tests {
             CharacterChoice::new(character('a'), BTreeSet1::from_one(character('b'))).unwrap();
 
         assert_eq!(choice.correct_choice(), character('a'));
+    }
+
+    #[test]
+    fn rejects_more_than_twenty_expected_answers() {
+        let free_input = |count: usize| {
+            FreeInput::new(BTreeSet1::from_head_and_tail(
+                FreeInputAnswer::new("answer0").unwrap(),
+                (1..count).map(|index| FreeInputAnswer::new(format!("answer{index}")).unwrap()),
+            ))
+        };
+
+        assert!(free_input(20).is_ok());
+        assert_eq!(
+            free_input(21),
+            Err(FreeInputError::TooManyExpectedAnswers { count: 21 })
+        );
+    }
+
+    #[test]
+    fn rejects_more_than_nine_wrong_choices() {
+        let choice = |count: usize| {
+            CharacterChoice::new(
+                character('a'),
+                BTreeSet1::from_head_and_tail(
+                    character('b'),
+                    (1..count).map(|index| character(char::from(b'b' + index as u8))),
+                ),
+            )
+        };
+
+        assert!(choice(9).is_ok());
+        assert_eq!(
+            choice(10),
+            Err(CharacterChoiceError::TooManyWrongChoices { count: 10 })
+        );
+    }
+
+    #[test]
+    fn rejects_more_than_fifty_positions() {
+        let position =
+            || CharacterChoice::new(character('a'), BTreeSet1::from_one(character('b'))).unwrap();
+        let choices = |count: usize| {
+            CharacterChoices::new(Vec1::from_head_and_tail(
+                position(),
+                (1..count).map(|_| position()),
+            ))
+        };
+
+        assert!(choices(50).is_ok());
+        assert_eq!(
+            choices(51),
+            Err(CharacterChoicesError::TooManyPositions { count: 51 })
+        );
     }
 
     #[test]

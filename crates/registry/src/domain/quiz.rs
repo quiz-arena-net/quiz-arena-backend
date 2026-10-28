@@ -627,9 +627,9 @@ mod tests {
     };
 
     fn free_input() -> ResponseMode {
-        ResponseMode::FreeInput(FreeInput::new(BTreeSet1::from_one(
-            FreeInputAnswer::new("Tokyo").unwrap(),
-        )))
+        ResponseMode::FreeInput(
+            FreeInput::new(BTreeSet1::from_one(FreeInputAnswer::new("Tokyo").unwrap())).unwrap(),
+        )
     }
 
     fn text_choice() -> ResponseMode {
