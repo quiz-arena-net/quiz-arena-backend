@@ -251,15 +251,24 @@ impl QuizList {
         Ok(())
     }
 
-    /// Creates a new quiz list with a freshly generated identifier.
+    /// Creates a new quiz list with a freshly generated identifier and the
+    /// first version of its entries.
     pub(crate) fn new(
         owner: UserId,
         title: QuizListTitle,
         description: Option<QuizListDescription>,
         visibility: Visibility,
-        entries: QuizListEntries,
+        quiz_ids: Vec<QuizId>,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizListError> {
+        let entries = QuizListEntries::new(QuizListEntriesId::new(), quiz_ids).map_err(
+            |error| match error {
+                QuizListEntriesError::DuplicateQuiz => QuizListError::DuplicateQuiz,
+                QuizListEntriesError::TooManyQuizzes { count } => {
+                    QuizListError::TooManyQuizzes { count }
+                }
+            },
+        )?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id: QuizListId::new(),
@@ -389,6 +398,13 @@ impl QuizList {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum QuizListError {
+    #[error("a quiz list must not contain the same quiz twice")]
+    DuplicateQuiz,
+    #[error(
+        "a quiz list must have at most {} quizzes, got {count}",
+        QuizListEntries::MAX_QUIZZES
+    )]
+    TooManyQuizzes { count: usize },
     #[error(
         "a quiz list must have at most {} tags, got {count}",
         QuizList::MAX_TAGS
@@ -449,7 +465,7 @@ mod tests {
     }
 
     fn new_quiz_list(
-        entries: QuizListEntries,
+        quiz_ids: Vec<QuizId>,
         tags: BTreeSet<Tag>,
     ) -> Result<QuizList, QuizListError> {
         QuizList::new(
@@ -457,7 +473,7 @@ mod tests {
             QuizListTitle::new("Capitals").unwrap(),
             None,
             Visibility::Private,
-            entries,
+            quiz_ids,
             tags,
         )
     }
@@ -546,7 +562,7 @@ mod tests {
 
     #[test]
     fn creates_quiz_list_at_the_tag_limit() {
-        let quiz_list = new_quiz_list(entries(Vec::new()).unwrap(), tags(10)).unwrap();
+        let quiz_list = new_quiz_list(Vec::new(), tags(10)).unwrap();
 
         assert_eq!(quiz_list.tags().len(), 10);
     }
@@ -554,7 +570,7 @@ mod tests {
     #[test]
     fn rejects_more_than_ten_tags() {
         assert_eq!(
-            new_quiz_list(entries(Vec::new()).unwrap(), tags(11)),
+            new_quiz_list(Vec::new(), tags(11)),
             Err(QuizListError::TooManyTags { count: 11 })
         );
     }
@@ -582,7 +598,7 @@ mod tests {
 
     #[test]
     fn rejected_tag_change_leaves_quiz_list_unchanged() {
-        let mut quiz_list = new_quiz_list(entries(quiz_ids(1)).unwrap(), tags(1)).unwrap();
+        let mut quiz_list = new_quiz_list(quiz_ids(1), tags(1)).unwrap();
         let before = quiz_list.clone();
 
         assert_eq!(
