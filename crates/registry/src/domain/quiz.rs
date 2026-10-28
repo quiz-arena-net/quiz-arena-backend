@@ -217,7 +217,7 @@ impl DraftQuizContent {
     /// Validates all fields and returns content ready for publication.
     ///
     /// Returns all violations instead of stopping at the first one.
-    pub(crate) fn validate(&self) -> Result<QuizContent, Vec1<ValidationError>> {
+    pub(crate) fn validate(&self) -> Result<QuizContent, Vec1<DraftQuizContentValidateError>> {
         todo!()
     }
 }
@@ -245,7 +245,7 @@ pub(crate) enum DraftQuizContentError {
 /// Positions of character choices are zero-based indexes into
 /// [`DraftCharacterChoices::choices`](super::response_mode::DraftCharacterChoices::choices).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum ValidationError {
+pub(crate) enum DraftQuizContentValidateError {
     #[error("prompt text must not be empty or only whitespace")]
     PromptTextBlank,
     #[error("canonical answer must not be empty or only whitespace")]
@@ -579,7 +579,7 @@ pub(crate) enum PublishError {
     #[error("the quiz has no draft")]
     NoDraft,
     #[error("the draft is not ready for publication")]
-    Invalid(Vec1<ValidationError>),
+    Invalid(Vec1<DraftQuizContentValidateError>),
 }
 
 #[cfg(test)]
