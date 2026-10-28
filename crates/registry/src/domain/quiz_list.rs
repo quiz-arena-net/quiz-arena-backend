@@ -148,20 +148,39 @@ pub(crate) struct QuizListEntries {
 impl QuizListEntries {
     pub(crate) const MAX_QUIZZES: usize = 100;
 
-    pub(crate) fn new(
-        id: QuizListEntriesId,
-        quiz_ids: Vec<QuizId>,
-    ) -> Result<Self, QuizListEntriesError> {
+    fn check_quiz_ids(quiz_ids: &[QuizId]) -> Result<(), QuizListEntriesError> {
         let count = quiz_ids.len();
         if count > Self::MAX_QUIZZES {
             return Err(QuizListEntriesError::TooManyQuizzes { count });
         }
         let mut seen = BTreeSet::new();
-        for quiz_id in &quiz_ids {
+        for quiz_id in quiz_ids {
             if !seen.insert(quiz_id) {
                 return Err(QuizListEntriesError::DuplicateQuiz);
             }
         }
+        Ok(())
+    }
+
+    /// Creates a new version of the entries with a freshly generated
+    /// identifier.
+    pub(crate) fn new(quiz_ids: Vec<QuizId>) -> Result<Self, QuizListEntriesError> {
+        Self::check_quiz_ids(&quiz_ids)?;
+        Ok(Self {
+            id: QuizListEntriesId::new(),
+            quiz_ids,
+        })
+    }
+
+    /// Rehydrates a version of the entries from persisted state.
+    ///
+    /// For repository implementations only. Checks the invariants, which hold
+    /// for every version however it was obtained.
+    pub(crate) fn from_persistence(
+        id: QuizListEntriesId,
+        quiz_ids: Vec<QuizId>,
+    ) -> Result<Self, QuizListEntriesError> {
+        Self::check_quiz_ids(&quiz_ids)?;
         Ok(Self { id, quiz_ids })
     }
 
@@ -261,14 +280,12 @@ impl QuizList {
         quiz_ids: Vec<QuizId>,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizListError> {
-        let entries = QuizListEntries::new(QuizListEntriesId::new(), quiz_ids).map_err(
-            |error| match error {
-                QuizListEntriesError::DuplicateQuiz => QuizListError::DuplicateQuiz,
-                QuizListEntriesError::TooManyQuizzes { count } => {
-                    QuizListError::TooManyQuizzes { count }
-                }
-            },
-        )?;
+        let entries = QuizListEntries::new(quiz_ids).map_err(|error| match error {
+            QuizListEntriesError::DuplicateQuiz => QuizListError::DuplicateQuiz,
+            QuizListEntriesError::TooManyQuizzes { count } => {
+                QuizListError::TooManyQuizzes { count }
+            }
+        })?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id: QuizListId::new(),
@@ -455,7 +472,7 @@ mod tests {
     }
 
     fn entries(quiz_ids: Vec<QuizId>) -> Result<QuizListEntries, QuizListEntriesError> {
-        QuizListEntries::new(QuizListEntriesId::new(), quiz_ids)
+        QuizListEntries::new(quiz_ids)
     }
 
     fn tags(count: usize) -> BTreeSet<Tag> {

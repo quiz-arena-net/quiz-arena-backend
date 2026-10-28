@@ -341,14 +341,7 @@ pub(crate) struct QuizContent {
 impl QuizContent {
     pub(crate) const MAX_TAGS: usize = 10;
 
-    pub(crate) fn new(
-        id: QuizContentId,
-        prompt: Prompt,
-        canonical_answer: CanonicalAnswer,
-        response_modes: Vec1<ResponseMode>,
-        language: Language,
-        tags: BTreeSet<Tag>,
-    ) -> Result<Self, QuizContentError> {
+    fn check_response_modes(response_modes: &Vec1<ResponseMode>) -> Result<(), QuizContentError> {
         let mut seen_kinds = Vec::new();
         for response_mode in response_modes.iter() {
             let kind = mem::discriminant(response_mode);
@@ -357,10 +350,52 @@ impl QuizContent {
             }
             seen_kinds.push(kind);
         }
+        Ok(())
+    }
+
+    fn check_tags(tags: &BTreeSet<Tag>) -> Result<(), QuizContentError> {
         let count = tags.len();
         if count > Self::MAX_TAGS {
             return Err(QuizContentError::TooManyTags { count });
         }
+        Ok(())
+    }
+
+    /// Creates a new version of the content with a freshly generated
+    /// identifier.
+    pub(crate) fn new(
+        prompt: Prompt,
+        canonical_answer: CanonicalAnswer,
+        response_modes: Vec1<ResponseMode>,
+        language: Language,
+        tags: BTreeSet<Tag>,
+    ) -> Result<Self, QuizContentError> {
+        Self::check_response_modes(&response_modes)?;
+        Self::check_tags(&tags)?;
+        Ok(Self {
+            id: QuizContentId::new(),
+            prompt,
+            canonical_answer,
+            response_modes,
+            language,
+            tags,
+        })
+    }
+
+    /// Rehydrates a version of the content from persisted state.
+    ///
+    /// For repository implementations only. Checks the invariants, which hold
+    /// for every version however it was obtained.
+    pub(crate) fn from_persistence(
+        id: QuizContentId,
+        prompt: Prompt,
+        canonical_answer: CanonicalAnswer,
+        response_modes: Vec1<ResponseMode>,
+        language: Language,
+        tags: BTreeSet<Tag>,
+    ) -> Result<Self, QuizContentError> {
+        Self::check_response_modes(&response_modes)?;
+        Self::check_tags(&tags)?;
         Ok(Self {
             id,
             prompt,
@@ -619,7 +654,6 @@ mod tests {
         tags: BTreeSet<Tag>,
     ) -> Result<QuizContent, QuizContentError> {
         QuizContent::new(
-            QuizContentId::new(),
             Prompt::new(
                 PromptText::new("What is the capital of Japan?").unwrap(),
                 None,
