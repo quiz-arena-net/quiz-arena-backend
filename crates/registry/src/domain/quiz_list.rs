@@ -130,10 +130,11 @@ impl QuizListVersionId {
     }
 }
 
-/// Controls who can find or view a quiz list.
+/// The audience of a quiz list.
 ///
-/// Whether a quiz in the list can be used is determined by its
-/// [`QuizUsePolicy`](super::quiz_use_policy::QuizUsePolicy).
+/// Determines who can find the list, view it and start a session from it.
+/// Whether a quiz may be included in the list is determined by its
+/// [`InclusionPolicy`](super::quiz::InclusionPolicy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum Visibility {
     /// Anyone can find and view the list.
@@ -153,7 +154,9 @@ pub(crate) enum Visibility {
 /// not delete its quizzes.
 ///
 /// Whether a quiz can be added is determined by
-/// [`QuizUsePolicy::usable_by`](super::quiz_use_policy::QuizUsePolicy::usable_by).
+/// [`Quiz::includable_by`](super::quiz::Quiz::includable_by). The same check
+/// runs again when a session builds its lineup. An inclusion that is no longer
+/// permitted stays in the list and is skipped.
 ///
 /// A list can contain up to 100 quizzes, with no duplicates, and up to 10 tags.
 /// It does not check whether its quizzes still exist. Edit permissions are

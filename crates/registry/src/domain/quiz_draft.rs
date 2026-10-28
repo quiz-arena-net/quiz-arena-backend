@@ -5,10 +5,9 @@ use mitsein::vec1::Vec1;
 
 use super::{
     media::Media,
-    quiz::{CanonicalAnswerError, PromptTextError, Quiz, QuizContent, QuizId},
+    quiz::{CanonicalAnswerError, PromptTextError, QuizContent},
     response_mode::{CharacterChoiceError, DraftResponseMode, ImageChoiceError, TextChoiceError},
     tag::Tag,
-    user::UserId,
 };
 
 /// The content of a quiz draft.
@@ -147,76 +146,4 @@ pub(crate) enum QuizDraftValidationError {
         position: usize,
         error: CharacterChoiceError,
     },
-}
-
-/// The content that will become the next published version of a quiz.
-///
-/// Shares its identifier with the quiz, so each quiz has at most one draft.
-/// Before the first publication only the draft exists. Publishing, through
-/// [`Quiz::publish`] or [`Quiz::revise`], consumes the draft.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct QuizDraft {
-    /// The identifier of the quiz this draft belongs to.
-    id: QuizId,
-
-    /// The author of the quiz.
-    author: UserId,
-
-    /// The content being worked on.
-    content: QuizDraftContent,
-}
-
-impl QuizDraft {
-    /// Starts a new quiz with a freshly generated identifier.
-    pub(crate) fn new(author: UserId, content: QuizDraftContent) -> Self {
-        Self {
-            id: QuizId::new(),
-            author,
-            content,
-        }
-    }
-
-    /// Starts a revision of a published quiz, copying the content of its latest
-    /// version.
-    pub(crate) fn from_quiz(quiz: &Quiz) -> Self {
-        let _ = quiz;
-        todo!()
-    }
-
-    /// Rehydrates a draft from persisted state.
-    ///
-    /// For repository implementations only. The draft has no invariants beyond
-    /// those carried by [`QuizDraftContent`], so this cannot fail.
-    pub(crate) fn from_persistence(id: QuizId, author: UserId, content: QuizDraftContent) -> Self {
-        Self {
-            id,
-            author,
-            content,
-        }
-    }
-
-    pub(crate) fn id(&self) -> QuizId {
-        self.id
-    }
-
-    pub(crate) fn author(&self) -> UserId {
-        self.author
-    }
-
-    pub(crate) fn content(&self) -> &QuizDraftContent {
-        &self.content
-    }
-
-    /// Whether `user` may edit, publish or discard this draft. Only the author
-    /// may.
-    pub(crate) fn editable_by(&self, user: UserId) -> bool {
-        let _ = user;
-        todo!()
-    }
-
-    /// Replaces the content wholesale.
-    pub(crate) fn edit(&mut self, content: QuizDraftContent) {
-        let _ = content;
-        todo!()
-    }
 }

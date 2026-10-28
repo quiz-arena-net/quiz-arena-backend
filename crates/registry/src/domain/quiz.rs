@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::{
     media::Media,
-    quiz_draft::{QuizDraft, QuizDraftValidationError},
+    quiz_draft::{QuizDraftContent, QuizDraftValidationError},
     response_mode::ResponseMode,
     tag::Tag,
     user::UserId,
@@ -259,11 +259,52 @@ pub(crate) enum QuizContentError {
     #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
     TooManyTags { count: usize },
 }
-
-/// A published quiz at a specific version of its content.
+/// Whose quiz lists may include a quiz.
 ///
-/// Each revision replaces the content, but keeps the same quiz ID. Statistics
-/// use the quiz ID, regardless of version.
+/// Sessions pose quizzes through quiz lists. This policy governs who may
+/// redistribute the quiz through their own lists, not who may play it. A quiz
+/// in a public list owned by its author can be played by anyone who can reach
+/// that list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum InclusionPolicy {
+    /// Only lists owned by the author.
+    AuthorOnly,
+
+    /// Lists owned by anyone.
+    Anyone,
+}
+
+/// Where a quiz is in its publication lifecycle.
+///
+/// A quiz starts out unpublished with a draft. Publishing turns the draft into
+/// the first content version. A published quiz may hold a draft of its next
+/// version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum QuizState {
+    /// Never published. Only a draft exists.
+    Unpublished {
+        /// The content being worked on.
+        draft: QuizDraftContent,
+    },
+
+    /// Published at least once.
+    Published {
+        /// The latest published version.
+        content: QuizContent,
+
+        /// The content being worked on for the next version.
+        draft: Option<QuizDraftContent>,
+    },
+}
+
+/// A quiz authored by a user.
+///
+/// A quiz may be unpublished or published, see [`QuizState`]. It keeps its
+/// identity across revisions. Each publication replaces the content with a new
+/// version. Statistics use the quiz ID regardless of version. The inclusion
+/// policy and the draft are not versioned.
+///
+/// Whether a user may edit a quiz is answered by [`Quiz::editable_by`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Quiz {
     /// The unique identifier of this quiz.
@@ -272,30 +313,46 @@ pub(crate) struct Quiz {
     /// The author who created this quiz.
     author: UserId,
 
-    /// The content at the version this snapshot represents.
-    content: QuizContent,
+    /// Whose quiz lists may include this quiz.
+    ///
+    /// Checked when the quiz is added to a list and again when a session builds
+    /// its lineup from one.
+    inclusion_policy: InclusionPolicy,
+
+    /// Where this quiz is in its publication lifecycle.
+    state: QuizState,
 }
 
 impl Quiz {
-    /// Publishes a quiz for the first time.
-    ///
-    /// Consumes the draft and creates the first content version. Revising an
-    /// already published quiz goes through [`Quiz::revise`] instead. The quiz's
-    /// use policy is created alongside by the application layer.
-    pub(crate) fn publish(draft: QuizDraft) -> Result<Self, Vec1<QuizDraftValidationError>> {
-        let _ = draft;
-        todo!()
+    /// Starts a new, unpublished quiz with a freshly generated identifier.
+    pub(crate) fn new(
+        author: UserId,
+        draft: QuizDraftContent,
+        inclusion_policy: InclusionPolicy,
+    ) -> Self {
+        Self {
+            id: QuizId::new(),
+            author,
+            inclusion_policy,
+            state: QuizState::Unpublished { draft },
+        }
     }
 
     /// Rehydrates a quiz from persisted state.
     ///
     /// For repository implementations only. The aggregate invariants are
-    /// carried by [`QuizContent`], so this cannot fail.
-    pub(crate) fn from_persistence(id: QuizId, author: UserId, content: QuizContent) -> Self {
+    /// carried by [`QuizContent`] and [`QuizState`], so this cannot fail.
+    pub(crate) fn from_persistence(
+        id: QuizId,
+        author: UserId,
+        inclusion_policy: InclusionPolicy,
+        state: QuizState,
+    ) -> Self {
         Self {
             id,
             author,
-            content,
+            inclusion_policy,
+            state,
         }
     }
 
@@ -307,30 +364,80 @@ impl Quiz {
         self.author
     }
 
-    pub(crate) fn content(&self) -> &QuizContent {
-        &self.content
+    pub(crate) fn inclusion_policy(&self) -> InclusionPolicy {
+        self.inclusion_policy
     }
 
-    /// Whether `user` may edit this quiz (revise it, change its use policy, or
-    /// delete it).
+    pub(crate) fn state(&self) -> &QuizState {
+        &self.state
+    }
+
+    /// Returns whether `user` may edit this quiz.
     ///
-    /// Only the author may do so.
+    /// Editing covers working on the draft, publishing, changing the inclusion
+    /// policy and deleting the quiz. Only the author may edit.
     pub(crate) fn editable_by(&self, user: UserId) -> bool {
         let _ = user;
         todo!()
     }
 
-    /// Publishes the draft as the next version of this quiz.
+    /// Returns whether a quiz list owned by `list_owner` may include this quiz.
     ///
-    /// Consumes the draft and replaces the content with a new version. The
-    /// draft must belong to this quiz.
-    pub(crate) fn revise(
-        &mut self,
-        draft: QuizDraft,
-    ) -> Result<(), Vec1<QuizDraftValidationError>> {
+    /// The author always may. Anyone else may only under
+    /// [`InclusionPolicy::Anyone`].
+    pub(crate) fn includable_by(&self, list_owner: UserId) -> bool {
+        let _ = list_owner;
+        todo!()
+    }
+
+    /// Replaces the draft. Starts one if the quiz has none.
+    pub(crate) fn edit_draft(&mut self, draft: QuizDraftContent) {
         let _ = draft;
         todo!()
     }
+
+    /// Drops the draft of a published quiz.
+    ///
+    /// Fails with [`QuizError::NoDraft`] or [`QuizError::Unpublished`]. An
+    /// unpublished quiz has nothing but its draft, so discarding that draft
+    /// means deleting the quiz.
+    pub(crate) fn discard_draft(&mut self) -> Result<(), QuizError> {
+        todo!()
+    }
+
+    /// Publishes the draft as the next content version.
+    ///
+    /// For an unpublished quiz this creates the first version. The draft is
+    /// consumed. Fails with [`QuizPublishError::NoDraft`] or with every
+    /// validation error of the draft.
+    pub(crate) fn publish(&mut self) -> Result<(), QuizPublishError> {
+        todo!()
+    }
+
+    /// Changes whose lists may include this quiz.
+    ///
+    /// Takes effect immediately and does not involve the draft. Inclusions that
+    /// are no longer permitted are skipped when a session builds its lineup.
+    pub(crate) fn change_inclusion_policy(&mut self, inclusion_policy: InclusionPolicy) {
+        let _ = inclusion_policy;
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum QuizError {
+    #[error("the quiz has no draft")]
+    NoDraft,
+    #[error("the quiz has not been published")]
+    Unpublished,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum QuizPublishError {
+    #[error("the quiz has no draft")]
+    NoDraft,
+    #[error("the draft is not ready for publication")]
+    Invalid(Vec1<QuizDraftValidationError>),
 }
 
 #[cfg(test)]
