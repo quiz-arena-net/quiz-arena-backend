@@ -327,15 +327,11 @@ impl QuizList {
     /// Inserts a quiz at `position`, or appends it when `position` is `None`.
     ///
     /// Assigns a new version.
-    ///
-    /// Fails with [`QuizListError::DuplicateQuiz`],
-    /// [`QuizListError::TooManyQuizzes`] or
-    /// [`QuizListError::PositionOutOfRange`].
     pub(crate) fn add_quiz(
         &mut self,
         quiz_id: QuizId,
         position: Option<usize>,
-    ) -> Result<(), QuizListError> {
+    ) -> Result<(), AddQuizError> {
         let _ = (quiz_id, position);
         todo!()
     }
@@ -343,27 +339,26 @@ impl QuizList {
     /// Removes a quiz from the list.
     ///
     /// Assigns a new version.
-    ///
-    /// Fails with [`QuizListError::QuizNotFound`].
-    pub(crate) fn remove_quiz(&mut self, quiz_id: QuizId) -> Result<(), QuizListError> {
+    pub(crate) fn remove_quiz(&mut self, quiz_id: QuizId) -> Result<(), RemoveQuizError> {
         let _ = quiz_id;
         todo!()
     }
 
     /// Replaces the order of the quizzes.
     ///
-    /// Assigns a new version.
-    ///
-    /// `order` must be a permutation of the current quizzes, otherwise fails
-    /// with [`QuizListError::NotAPermutation`].
-    pub(crate) fn reorder(&mut self, order: Vec<QuizId>) -> Result<(), QuizListError> {
+    /// Assigns a new version. `order` must be a permutation of the current
+    /// quizzes.
+    pub(crate) fn reorder(&mut self, order: Vec<QuizId>) -> Result<(), ReorderError> {
         let _ = order;
         todo!()
     }
 
-    /// Replaces the tags. Fails only with [`QuizListError::TooManyTags`].
-    pub(crate) fn change_tags(&mut self, tags: BTreeSet<Tag>) -> Result<(), QuizListError> {
-        Self::check_tags(&tags)?;
+    /// Replaces the tags.
+    pub(crate) fn change_tags(&mut self, tags: BTreeSet<Tag>) -> Result<(), ChangeTagsError> {
+        let count = tags.len();
+        if count > Self::MAX_TAGS {
+            return Err(ChangeTagsError::TooManyTags { count });
+        }
         self.tags = tags;
         Ok(())
     }
@@ -373,17 +368,45 @@ impl QuizList {
 pub(crate) enum QuizListError {
     #[error("a quiz list must not contain the same quiz twice")]
     DuplicateQuiz,
-    #[error("the new order must contain exactly the quizzes currently in the list")]
-    NotAPermutation,
-    #[error("position {position} is beyond the end of the quiz list")]
-    PositionOutOfRange { position: usize },
-    #[error("the quiz is not in the quiz list")]
-    QuizNotFound,
     #[error(
         "a quiz list must have at most {} quizzes, got {count}",
         QuizList::MAX_QUIZZES
     )]
     TooManyQuizzes { count: usize },
+    #[error(
+        "a quiz list must have at most {} tags, got {count}",
+        QuizList::MAX_TAGS
+    )]
+    TooManyTags { count: usize },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum AddQuizError {
+    #[error("a quiz list must not contain the same quiz twice")]
+    DuplicateQuiz,
+    #[error(
+        "a quiz list must have at most {} quizzes, got {count}",
+        QuizList::MAX_QUIZZES
+    )]
+    TooManyQuizzes { count: usize },
+    #[error("position {position} is beyond the end of the quiz list")]
+    PositionOutOfRange { position: usize },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum RemoveQuizError {
+    #[error("the quiz is not in the quiz list")]
+    QuizNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum ReorderError {
+    #[error("the new order must contain exactly the quizzes currently in the list")]
+    NotAPermutation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum ChangeTagsError {
     #[error(
         "a quiz list must have at most {} tags, got {count}",
         QuizList::MAX_TAGS
@@ -548,7 +571,7 @@ mod tests {
 
         assert_eq!(
             quiz_list.change_tags(tags(11)),
-            Err(QuizListError::TooManyTags { count: 11 })
+            Err(ChangeTagsError::TooManyTags { count: 11 })
         );
         assert_eq!(quiz_list, before);
     }

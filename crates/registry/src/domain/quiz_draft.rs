@@ -86,7 +86,7 @@ impl QuizDraftContent {
     /// Validates all fields and returns content ready for publication.
     ///
     /// Returns all violations instead of stopping at the first one.
-    pub(crate) fn validate(&self) -> Result<QuizContent, Vec1<QuizDraftValidationError>> {
+    pub(crate) fn validate(&self) -> Result<QuizContent, Vec1<ValidationError>> {
         todo!()
     }
 }
@@ -114,7 +114,7 @@ pub(crate) enum QuizDraftContentError {
 /// Positions of character choices are zero-based indexes into
 /// [`DraftCharacterChoices::choices`](super::response_mode::DraftCharacterChoices::choices).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum QuizDraftValidationError {
+pub(crate) enum ValidationError {
     #[error(transparent)]
     PromptText(PromptTextError),
     #[error(transparent)]

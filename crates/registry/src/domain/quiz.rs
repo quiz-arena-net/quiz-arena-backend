@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::{
     media::Media,
-    quiz_draft::{QuizDraftContent, QuizDraftValidationError},
+    quiz_draft::{QuizDraftContent, ValidationError},
     response_mode::ResponseMode,
     tag::Tag,
     user::UserId,
@@ -398,19 +398,17 @@ impl Quiz {
 
     /// Drops the draft of a published quiz.
     ///
-    /// Fails with [`QuizError::NoDraft`] or [`QuizError::Unpublished`]. An
-    /// unpublished quiz has nothing but its draft, so discarding that draft
+    /// An unpublished quiz has nothing but its draft, so discarding that draft
     /// means deleting the quiz.
-    pub(crate) fn discard_draft(&mut self) -> Result<(), QuizError> {
+    pub(crate) fn discard_draft(&mut self) -> Result<(), DiscardDraftError> {
         todo!()
     }
 
     /// Publishes the draft as the next content version.
     ///
     /// For an unpublished quiz this creates the first version. The draft is
-    /// consumed. Fails with [`QuizPublishError::NoDraft`] or with every
-    /// validation error of the draft.
-    pub(crate) fn publish(&mut self) -> Result<(), QuizPublishError> {
+    /// consumed.
+    pub(crate) fn publish(&mut self) -> Result<(), PublishError> {
         todo!()
     }
 
@@ -425,7 +423,7 @@ impl Quiz {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum QuizError {
+pub(crate) enum DiscardDraftError {
     #[error("the quiz has no draft")]
     NoDraft,
     #[error("the quiz has not been published")]
@@ -433,11 +431,11 @@ pub(crate) enum QuizError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum QuizPublishError {
+pub(crate) enum PublishError {
     #[error("the quiz has no draft")]
     NoDraft,
     #[error("the draft is not ready for publication")]
-    Invalid(Vec1<QuizDraftValidationError>),
+    Invalid(Vec1<ValidationError>),
 }
 
 #[cfg(test)]
