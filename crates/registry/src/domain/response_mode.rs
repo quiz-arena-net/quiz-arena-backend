@@ -51,6 +51,25 @@ pub(crate) enum FreeInputAnswerError {
     InvalidCharacter,
 }
 
+/// A [`FreeInput`] that may still be incomplete.
+///
+/// The expected answers may be empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DraftFreeInput {
+    /// Reference answers for judging.
+    expected_answers: BTreeSet<FreeInputAnswer>,
+}
+
+impl DraftFreeInput {
+    pub(crate) fn new(expected_answers: BTreeSet<FreeInputAnswer>) -> Self {
+        Self { expected_answers }
+    }
+
+    pub(crate) fn expected_answers(&self) -> &BTreeSet<FreeInputAnswer> {
+        &self.expected_answers
+    }
+}
+
 /// The player provides an unrestricted textual response.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct FreeInput {
@@ -122,6 +141,48 @@ pub(crate) enum TextChoiceAnswerError {
     TooLong { length: usize },
     #[error("text choice answer must not contain NUL")]
     InvalidCharacter,
+}
+
+/// A [`TextChoice`] that may still be incomplete.
+///
+/// The correct answers may be empty, an answer may be both correct and wrong,
+/// and the answer limit is not enforced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DraftTextChoice {
+    /// Determines whether one or all correct answers must be selected.
+    choice_requirement: ChoiceRequirement,
+
+    /// Choices that are considered correct.
+    correct_answers: BTreeSet<TextChoiceAnswer>,
+
+    /// Choices that are considered incorrect.
+    wrong_answers: BTreeSet<TextChoiceAnswer>,
+}
+
+impl DraftTextChoice {
+    pub(crate) fn new(
+        choice_requirement: ChoiceRequirement,
+        correct_answers: BTreeSet<TextChoiceAnswer>,
+        wrong_answers: BTreeSet<TextChoiceAnswer>,
+    ) -> Self {
+        Self {
+            choice_requirement,
+            correct_answers,
+            wrong_answers,
+        }
+    }
+
+    pub(crate) fn choice_requirement(&self) -> ChoiceRequirement {
+        self.choice_requirement
+    }
+
+    pub(crate) fn correct_answers(&self) -> &BTreeSet<TextChoiceAnswer> {
+        &self.correct_answers
+    }
+
+    pub(crate) fn wrong_answers(&self) -> &BTreeSet<TextChoiceAnswer> {
+        &self.wrong_answers
+    }
 }
 
 /// The player selects from a collection of predefined text answers.
@@ -271,6 +332,48 @@ pub(crate) enum ImageChoiceAnswerError {
     NotAnImage,
 }
 
+/// An [`ImageChoice`] that may still be incomplete.
+///
+/// The correct answers may be empty, an image may appear twice, and the answer
+/// limit is not enforced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DraftImageChoice {
+    /// Determines whether one or all correct answers must be selected.
+    choice_requirement: ChoiceRequirement,
+
+    /// Choices that are considered correct.
+    correct_answers: BTreeSet<ImageChoiceAnswer>,
+
+    /// Choices that are considered incorrect.
+    wrong_answers: BTreeSet<ImageChoiceAnswer>,
+}
+
+impl DraftImageChoice {
+    pub(crate) fn new(
+        choice_requirement: ChoiceRequirement,
+        correct_answers: BTreeSet<ImageChoiceAnswer>,
+        wrong_answers: BTreeSet<ImageChoiceAnswer>,
+    ) -> Self {
+        Self {
+            choice_requirement,
+            correct_answers,
+            wrong_answers,
+        }
+    }
+
+    pub(crate) fn choice_requirement(&self) -> ChoiceRequirement {
+        self.choice_requirement
+    }
+
+    pub(crate) fn correct_answers(&self) -> &BTreeSet<ImageChoiceAnswer> {
+        &self.correct_answers
+    }
+
+    pub(crate) fn wrong_answers(&self) -> &BTreeSet<ImageChoiceAnswer> {
+        &self.wrong_answers
+    }
+}
+
 /// The player selects from a collection of predefined image answers.
 ///
 /// Guaranteed to hold at most 4 answers, no two of them with the same image.
@@ -364,6 +467,39 @@ pub(crate) enum CharacterError {
     Invalid,
 }
 
+/// A [`CharacterChoice`] that may still be incomplete.
+///
+/// The correct choice may be missing, the wrong choices may be empty, and the
+/// correct choice may also appear among the wrong ones.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DraftCharacterChoice {
+    /// The correct character for this position.
+    correct_choice: Option<Character>,
+
+    /// Incorrect characters that may be presented alongside the correct one.
+    wrong_choices: BTreeSet<Character>,
+}
+
+impl DraftCharacterChoice {
+    pub(crate) fn new(
+        correct_choice: Option<Character>,
+        wrong_choices: BTreeSet<Character>,
+    ) -> Self {
+        Self {
+            correct_choice,
+            wrong_choices,
+        }
+    }
+
+    pub(crate) fn correct_choice(&self) -> Option<Character> {
+        self.correct_choice
+    }
+
+    pub(crate) fn wrong_choices(&self) -> &BTreeSet<Character> {
+        &self.wrong_choices
+    }
+}
+
 /// The choices presented for one position in a character-by-character response.
 ///
 /// Exactly one choice is correct. The remaining choices are distractors, and
@@ -406,6 +542,28 @@ pub(crate) enum CharacterChoiceError {
     CorrectChoiceAmongWrongChoices,
 }
 
+/// A [`CharacterChoices`] that may still be incomplete.
+///
+/// The positions may be empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DraftCharacterChoices {
+    /// The choices for each position.
+    ///
+    /// The order is significant as it corresponds to the order of characters in
+    /// the answer.
+    choices: Vec<DraftCharacterChoice>,
+}
+
+impl DraftCharacterChoices {
+    pub(crate) fn new(choices: Vec<DraftCharacterChoice>) -> Self {
+        Self { choices }
+    }
+
+    pub(crate) fn choices(&self) -> &[DraftCharacterChoice] {
+        &self.choices
+    }
+}
+
 /// The player constructs the answer one character at a time by selecting from a
 /// set of candidate characters at each position.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -425,6 +583,19 @@ impl CharacterChoices {
     pub(crate) fn choices(&self) -> &Vec1<CharacterChoice> {
         &self.choices
     }
+}
+
+/// A [`ResponseMode`] that may still be incomplete.
+///
+/// Each variant relaxes the non-emptiness constraints of its counterpart.
+/// Individual answers are the validated value types, so a draft holds either a
+/// complete answer or none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DraftResponseMode {
+    FreeInput(DraftFreeInput),
+    TextChoice(DraftTextChoice),
+    ImageChoice(DraftImageChoice),
+    CharacterChoices(DraftCharacterChoices),
 }
 
 /// A way in which players may respond to a quiz.
