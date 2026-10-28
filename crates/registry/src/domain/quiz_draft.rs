@@ -5,8 +5,8 @@ use mitsein::vec1::Vec1;
 
 use super::{
     media::Media,
-    quiz::{CanonicalAnswerError, PromptTextError, QuizContent},
-    response_mode::{CharacterChoiceError, DraftResponseMode, ImageChoiceError, TextChoiceError},
+    quiz::QuizContent,
+    response_mode::{DraftResponseMode, ImageChoice, TextChoice},
     tag::Tag,
 };
 
@@ -115,10 +115,10 @@ pub(crate) enum QuizDraftContentError {
 /// [`DraftCharacterChoices::choices`](super::response_mode::DraftCharacterChoices::choices).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum ValidationError {
-    #[error(transparent)]
-    PromptText(PromptTextError),
-    #[error(transparent)]
-    CanonicalAnswer(CanonicalAnswerError),
+    #[error("prompt text must not be empty or only whitespace")]
+    PromptTextBlank,
+    #[error("canonical answer must not be empty or only whitespace")]
+    CanonicalAnswerBlank,
     #[error("a quiz must support at least one response mode")]
     NoResponseMode,
     #[error("a quiz must not support the same kind of response mode twice")]
@@ -129,21 +129,30 @@ pub(crate) enum ValidationError {
     FreeInputNoExpectedAnswer,
     #[error("a text choice must have at least one correct answer")]
     TextChoiceNoCorrectAnswer,
-    #[error(transparent)]
-    TextChoice(TextChoiceError),
+    #[error("a text choice answer must not be both correct and wrong")]
+    TextChoiceAnswerBothCorrectAndWrong,
+    #[error(
+        "a text choice must have at most {} answers, got {count}",
+        TextChoice::MAX_ANSWERS
+    )]
+    TextChoiceTooManyAnswers { count: usize },
     #[error("an image choice must have at least one correct answer")]
     ImageChoiceNoCorrectAnswer,
-    #[error(transparent)]
-    ImageChoice(ImageChoiceError),
+    #[error("an image must not appear in more than one image choice answer")]
+    ImageChoiceDuplicateImage,
+    #[error(
+        "an image choice must have at most {} answers, got {count}",
+        ImageChoice::MAX_ANSWERS
+    )]
+    ImageChoiceTooManyAnswers { count: usize },
     #[error("character choices must have at least one position")]
     CharacterChoicesNoPosition,
     #[error("character choice at position {position} must have a correct character")]
     CharacterChoiceNoCorrectCharacter { position: usize },
     #[error("character choice at position {position} must have at least one wrong character")]
     CharacterChoiceNoWrongCharacter { position: usize },
-    #[error("character choice at position {position}: {error}")]
-    CharacterChoice {
-        position: usize,
-        error: CharacterChoiceError,
-    },
+    #[error(
+        "character choice at position {position} must not have its correct character among the wrong ones"
+    )]
+    CharacterChoiceCorrectChoiceAmongWrongChoices { position: usize },
 }
