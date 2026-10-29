@@ -531,6 +531,10 @@ impl ResponseMode {
 ///
 /// Positions of character choices are zero-based indexes into
 /// [`CharacterChoices::choices`].
+#[expect(
+    clippy::enum_variant_names,
+    reason = "every violation is something the mode lacks"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum ResponseModeValidateError {
     #[error("a free input must have at least one expected answer")]
