@@ -230,23 +230,23 @@ pub(crate) enum DraftQuizContentError {
     )]
     PromptTextTooLong { length: usize },
     #[error("prompt text must not contain NUL")]
-    PromptTextInvalidCharacter,
+    InvalidCharacterInPromptText,
     #[error(
         "canonical answer must be at most {} characters, got {length}",
         CanonicalAnswer::MAX_LENGTH
     )]
     CanonicalAnswerTooLong { length: usize },
     #[error("canonical answer must not contain NUL")]
-    CanonicalAnswerInvalidCharacter,
+    InvalidCharacterInCanonicalAnswer,
 }
 
 /// A reason a draft cannot be published.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum DraftQuizContentValidateError {
     #[error("prompt text must not be empty or only whitespace")]
-    PromptTextBlank,
+    BlankPromptText,
     #[error("canonical answer must not be empty or only whitespace")]
-    CanonicalAnswerBlank,
+    BlankCanonicalAnswer,
     #[error("a quiz must have a response mode")]
     NoResponseMode,
     #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
@@ -697,7 +697,7 @@ mod tests {
         assert_eq!(
             new_content(free_input, tags(0)),
             Err(QuizContentError::InvalidResponseMode(Vec1::from_one(
-                ResponseModeValidateError::FreeInputNoExpectedAnswer
+                ResponseModeValidateError::NoExpectedAnswer
             )))
         );
     }

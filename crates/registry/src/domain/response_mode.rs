@@ -493,35 +493,29 @@ impl ResponseMode {
         match self {
             Self::FreeInput(free_input) => {
                 if free_input.expected_answers.is_empty() {
-                    errors.push(ResponseModeValidateError::FreeInputNoExpectedAnswer);
+                    errors.push(ResponseModeValidateError::NoExpectedAnswer);
                 }
             }
             Self::TextChoice(text_choice) => {
                 if text_choice.correct_answers.is_empty() {
-                    errors.push(ResponseModeValidateError::TextChoiceNoCorrectAnswer);
+                    errors.push(ResponseModeValidateError::NoCorrectAnswer);
                 }
             }
             Self::ImageChoice(image_choice) => {
                 if image_choice.correct_answers.is_empty() {
-                    errors.push(ResponseModeValidateError::ImageChoiceNoCorrectAnswer);
+                    errors.push(ResponseModeValidateError::NoCorrectAnswer);
                 }
             }
             Self::CharacterChoices(character_choices) => {
                 if character_choices.choices.is_empty() {
-                    errors.push(ResponseModeValidateError::CharacterChoicesNoPosition);
+                    errors.push(ResponseModeValidateError::NoCharacterChoice);
                 }
                 for (position, choice) in character_choices.choices.iter().enumerate() {
                     if choice.correct_choice.is_none() {
-                        errors.push(
-                            ResponseModeValidateError::CharacterChoiceNoCorrectCharacter {
-                                position,
-                            },
-                        );
+                        errors.push(ResponseModeValidateError::NoCorrectCharacter { position });
                     }
                     if choice.wrong_choices.is_empty() {
-                        errors.push(ResponseModeValidateError::CharacterChoiceNoWrongCharacter {
-                            position,
-                        });
+                        errors.push(ResponseModeValidateError::NoWrongCharacter { position });
                     }
                 }
             }
@@ -540,17 +534,15 @@ impl ResponseMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum ResponseModeValidateError {
     #[error("a free input must have at least one expected answer")]
-    FreeInputNoExpectedAnswer,
-    #[error("a text choice must have at least one correct answer")]
-    TextChoiceNoCorrectAnswer,
-    #[error("an image choice must have at least one correct answer")]
-    ImageChoiceNoCorrectAnswer,
+    NoExpectedAnswer,
+    #[error("a choice must have at least one correct answer")]
+    NoCorrectAnswer,
     #[error("character choices must have at least one position")]
-    CharacterChoicesNoPosition,
+    NoCharacterChoice,
     #[error("character choice at position {position} must have a correct character")]
-    CharacterChoiceNoCorrectCharacter { position: usize },
+    NoCorrectCharacter { position: usize },
     #[error("character choice at position {position} must have at least one wrong character")]
-    CharacterChoiceNoWrongCharacter { position: usize },
+    NoWrongCharacter { position: usize },
 }
 
 #[cfg(test)]
@@ -835,9 +827,7 @@ mod tests {
 
         assert_eq!(
             ResponseMode::FreeInput(free_input).validate(),
-            Err(Vec1::from_one(
-                ResponseModeValidateError::FreeInputNoExpectedAnswer
-            ))
+            Err(Vec1::from_one(ResponseModeValidateError::NoExpectedAnswer))
         );
     }
 
@@ -854,15 +844,11 @@ mod tests {
 
         assert_eq!(
             ResponseMode::TextChoice(text_choice).validate(),
-            Err(Vec1::from_one(
-                ResponseModeValidateError::TextChoiceNoCorrectAnswer
-            ))
+            Err(Vec1::from_one(ResponseModeValidateError::NoCorrectAnswer))
         );
         assert_eq!(
             ResponseMode::ImageChoice(image_choice).validate(),
-            Err(Vec1::from_one(
-                ResponseModeValidateError::ImageChoiceNoCorrectAnswer
-            ))
+            Err(Vec1::from_one(ResponseModeValidateError::NoCorrectAnswer))
         );
     }
 
@@ -878,18 +864,16 @@ mod tests {
 
         assert_eq!(
             ResponseMode::CharacterChoices(empty).validate(),
-            Err(Vec1::from_one(
-                ResponseModeValidateError::CharacterChoicesNoPosition
-            ))
+            Err(Vec1::from_one(ResponseModeValidateError::NoCharacterChoice))
         );
         assert_eq!(
             ResponseMode::CharacterChoices(blank_positions).validate(),
             Err(Vec1::from_head_and_tail(
-                ResponseModeValidateError::CharacterChoiceNoCorrectCharacter { position: 0 },
+                ResponseModeValidateError::NoCorrectCharacter { position: 0 },
                 [
-                    ResponseModeValidateError::CharacterChoiceNoWrongCharacter { position: 1 },
-                    ResponseModeValidateError::CharacterChoiceNoCorrectCharacter { position: 2 },
-                    ResponseModeValidateError::CharacterChoiceNoWrongCharacter { position: 2 },
+                    ResponseModeValidateError::NoWrongCharacter { position: 1 },
+                    ResponseModeValidateError::NoCorrectCharacter { position: 2 },
+                    ResponseModeValidateError::NoWrongCharacter { position: 2 },
                 ]
             ))
         );
