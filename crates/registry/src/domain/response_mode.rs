@@ -645,10 +645,7 @@ pub(crate) enum DraftResponseMode {
     CharacterChoices(DraftCharacterChoices),
 }
 
-/// A way in which players may respond to a quiz.
-///
-/// A quiz may support multiple response modes. The game or session hosting the
-/// quiz can restrict which of those modes are used.
+/// The way in which players respond to a quiz.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ResponseMode {
     FreeInput(FreeInput),

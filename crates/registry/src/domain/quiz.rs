@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, mem};
+use std::collections::BTreeSet;
 
 use isolang::Language;
 use mitsein::vec1::Vec1;
@@ -144,8 +144,8 @@ pub(crate) enum CanonicalAnswerError {
 
 /// A [`QuizContent`] that may still be incomplete.
 ///
-/// Text may be blank, response modes may be missing or duplicated, and the tag
-/// limit is not enforced.
+/// Text may be blank, the response mode may be missing, and the tag limit is
+/// not enforced.
 ///
 /// Text length limits and NUL characters are checked at construction. All other
 /// constraints are checked by [`DraftQuizContent::validate`].
@@ -160,8 +160,8 @@ pub(crate) struct DraftQuizContent {
     /// The canonical answer.
     canonical_answer: String,
 
-    /// Response modes.
-    response_modes: Vec<DraftResponseMode>,
+    /// The response mode.
+    response_mode: Option<DraftResponseMode>,
 
     /// The language of the quiz.
     language: Language,
@@ -175,7 +175,7 @@ impl DraftQuizContent {
         prompt_text: impl Into<String>,
         prompt_media: Option<Media>,
         canonical_answer: impl Into<String>,
-        response_modes: Vec<DraftResponseMode>,
+        response_mode: Option<DraftResponseMode>,
         language: Language,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, DraftQuizContentError> {
@@ -183,7 +183,7 @@ impl DraftQuizContent {
             prompt_text.into(),
             prompt_media,
             canonical_answer.into(),
-            response_modes,
+            response_mode,
             language,
             tags,
         );
@@ -202,8 +202,8 @@ impl DraftQuizContent {
         &self.canonical_answer
     }
 
-    pub(crate) fn response_modes(&self) -> &[DraftResponseMode] {
-        &self.response_modes
+    pub(crate) fn response_mode(&self) -> Option<&DraftResponseMode> {
+        self.response_mode.as_ref()
     }
 
     pub(crate) fn language(&self) -> Language {
@@ -250,10 +250,8 @@ pub(crate) enum DraftQuizContentValidateError {
     PromptTextBlank,
     #[error("canonical answer must not be empty or only whitespace")]
     CanonicalAnswerBlank,
-    #[error("a quiz must support at least one response mode")]
+    #[error("a quiz must have a response mode")]
     NoResponseMode,
-    #[error("a quiz must not support the same kind of response mode twice")]
-    DuplicateResponseMode,
     #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
     TooManyTags { count: usize },
     #[error("a free input must have at least one expected answer")]
@@ -312,9 +310,8 @@ impl QuizContentId {
 
 /// One published version of a quiz's content.
 ///
-/// Guaranteed to support at most one response mode of each kind and to carry at
-/// most 10 tags. Session-specific behavior, such as how free-input responses
-/// are judged, is configured outside the aggregate.
+/// Guaranteed to carry at most 10 tags. Session-specific behavior, such as how
+/// free-input responses are judged, is configured outside the aggregate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuizContent {
     /// Identifies this version.
@@ -326,10 +323,8 @@ pub(crate) struct QuizContent {
     /// The canonical answer displayed when the answer is revealed.
     canonical_answer: CanonicalAnswer,
 
-    /// Response modes supported by this quiz.
-    ///
-    /// The order may be used when presenting the available response modes.
-    response_modes: Vec1<ResponseMode>,
+    /// The way players respond to this quiz.
+    response_mode: ResponseMode,
 
     /// The language in which this quiz is authored.
     language: Language,
@@ -340,18 +335,6 @@ pub(crate) struct QuizContent {
 
 impl QuizContent {
     pub(crate) const MAX_TAGS: usize = 10;
-
-    fn check_response_modes(response_modes: &Vec1<ResponseMode>) -> Result<(), QuizContentError> {
-        let mut seen_kinds = Vec::new();
-        for response_mode in response_modes.iter() {
-            let kind = mem::discriminant(response_mode);
-            if seen_kinds.contains(&kind) {
-                return Err(QuizContentError::DuplicateResponseMode);
-            }
-            seen_kinds.push(kind);
-        }
-        Ok(())
-    }
 
     fn check_tags(tags: &BTreeSet<Tag>) -> Result<(), QuizContentError> {
         let count = tags.len();
@@ -366,17 +349,16 @@ impl QuizContent {
     pub(crate) fn new(
         prompt: Prompt,
         canonical_answer: CanonicalAnswer,
-        response_modes: Vec1<ResponseMode>,
+        response_mode: ResponseMode,
         language: Language,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizContentError> {
-        Self::check_response_modes(&response_modes)?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id: QuizContentId::new(),
             prompt,
             canonical_answer,
-            response_modes,
+            response_mode,
             language,
             tags,
         })
@@ -390,17 +372,16 @@ impl QuizContent {
         id: QuizContentId,
         prompt: Prompt,
         canonical_answer: CanonicalAnswer,
-        response_modes: Vec1<ResponseMode>,
+        response_mode: ResponseMode,
         language: Language,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizContentError> {
-        Self::check_response_modes(&response_modes)?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id,
             prompt,
             canonical_answer,
-            response_modes,
+            response_mode,
             language,
             tags,
         })
@@ -418,8 +399,8 @@ impl QuizContent {
         &self.canonical_answer
     }
 
-    pub(crate) fn response_modes(&self) -> &Vec1<ResponseMode> {
-        &self.response_modes
+    pub(crate) fn response_mode(&self) -> &ResponseMode {
+        &self.response_mode
     }
 
     pub(crate) fn language(&self) -> Language {
@@ -433,8 +414,6 @@ impl QuizContent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum QuizContentError {
-    #[error("a quiz must not support the same kind of response mode twice")]
-    DuplicateResponseMode,
     #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
     TooManyTags { count: usize },
 }
@@ -622,24 +601,11 @@ mod tests {
     use mitsein::btree_set1::BTreeSet1;
 
     use super::*;
-    use crate::domain::response_mode::{
-        ChoiceRequirement, FreeInput, FreeInputAnswer, TextChoice, TextChoiceAnswer,
-    };
+    use crate::domain::response_mode::{FreeInput, FreeInputAnswer};
 
     fn free_input() -> ResponseMode {
         ResponseMode::FreeInput(
             FreeInput::new(BTreeSet1::from_one(FreeInputAnswer::new("Tokyo").unwrap())).unwrap(),
-        )
-    }
-
-    fn text_choice() -> ResponseMode {
-        ResponseMode::TextChoice(
-            TextChoice::new(
-                ChoiceRequirement::One,
-                BTreeSet1::from_one(TextChoiceAnswer::new("Tokyo").unwrap()),
-                BTreeSet::from([TextChoiceAnswer::new("Kyoto").unwrap()]),
-            )
-            .unwrap(),
         )
     }
 
@@ -650,7 +616,7 @@ mod tests {
     }
 
     fn new_content(
-        response_modes: Vec1<ResponseMode>,
+        response_mode: ResponseMode,
         tags: BTreeSet<Tag>,
     ) -> Result<QuizContent, QuizContentError> {
         QuizContent::new(
@@ -659,7 +625,7 @@ mod tests {
                 None,
             ),
             CanonicalAnswer::new("Tokyo").unwrap(),
-            response_modes,
+            response_mode,
             Language::Eng,
             tags,
         )
@@ -732,31 +698,16 @@ mod tests {
     }
 
     #[test]
-    fn creates_content_with_one_mode_of_each_kind() {
-        let content = new_content(
-            Vec1::from_head_and_tail(free_input(), [text_choice()]),
-            tags(10),
-        )
-        .unwrap();
+    fn creates_content_with_ten_tags() {
+        let content = new_content(free_input(), tags(10)).unwrap();
 
-        assert_eq!(content.response_modes().len().get(), 2);
         assert_eq!(content.tags().len(), 10);
-    }
-
-    #[test]
-    fn rejects_duplicate_response_mode_kind() {
-        let response_modes = Vec1::from_head_and_tail(free_input(), [text_choice(), free_input()]);
-
-        assert_eq!(
-            new_content(response_modes, tags(0)),
-            Err(QuizContentError::DuplicateResponseMode)
-        );
     }
 
     #[test]
     fn rejects_more_than_ten_tags() {
         assert_eq!(
-            new_content(Vec1::from_one(free_input()), tags(11)),
+            new_content(free_input(), tags(11)),
             Err(QuizContentError::TooManyTags { count: 11 })
         );
     }
