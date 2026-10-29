@@ -31,8 +31,8 @@ impl QuizId {
 }
 /// The question text presented to players.
 ///
-/// Guaranteed to be 1 to 1000 characters, not only whitespace, and free of NUL.
-/// Accepted text is preserved exactly.
+/// Guaranteed to be at most 1000 characters and free of NUL. May be blank,
+/// which only a draft is allowed to be. Accepted text is preserved exactly.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct PromptText(String);
 
@@ -41,9 +41,6 @@ impl PromptText {
 
     pub(crate) fn new(text: impl Into<String>) -> Result<Self, PromptTextError> {
         let text = text.into();
-        if text.trim().is_empty() {
-            return Err(PromptTextError::Blank);
-        }
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
             return Err(PromptTextError::TooLong { length });
@@ -57,12 +54,15 @@ impl PromptText {
     pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Returns whether the text is empty or only whitespace.
+    pub(crate) fn is_blank(&self) -> bool {
+        self.0.trim().is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum PromptTextError {
-    #[error("prompt text must not be empty or only whitespace")]
-    Blank,
     #[error(
         "prompt text must be at most {} characters, got {length}",
         PromptText::MAX_LENGTH
@@ -101,8 +101,8 @@ impl Prompt {
 /// This is intended for presentation and does not necessarily correspond
 /// exactly to the representation accepted by a particular [`ResponseMode`].
 ///
-/// Guaranteed to be 1 to 200 characters, not only whitespace, and free of NUL.
-/// Accepted text is preserved exactly.
+/// Guaranteed to be at most 200 characters and free of NUL. May be blank,
+/// which only a draft is allowed to be. Accepted text is preserved exactly.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct CanonicalAnswer(String);
 
@@ -111,9 +111,6 @@ impl CanonicalAnswer {
 
     pub(crate) fn new(text: impl Into<String>) -> Result<Self, CanonicalAnswerError> {
         let text = text.into();
-        if text.trim().is_empty() {
-            return Err(CanonicalAnswerError::Blank);
-        }
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
             return Err(CanonicalAnswerError::TooLong { length });
@@ -127,12 +124,15 @@ impl CanonicalAnswer {
     pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Returns whether the text is empty or only whitespace.
+    pub(crate) fn is_blank(&self) -> bool {
+        self.0.trim().is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum CanonicalAnswerError {
-    #[error("canonical answer must not be empty or only whitespace")]
-    Blank,
     #[error(
         "canonical answer must be at most {} characters, got {length}",
         CanonicalAnswer::MAX_LENGTH
@@ -144,21 +144,19 @@ pub(crate) enum CanonicalAnswerError {
 
 /// A [`QuizContent`] that may still be incomplete.
 ///
-/// Text may be blank, the response mode may be missing, and the tag limit is
-/// not enforced.
-///
-/// Text length limits and NUL characters are checked at construction. All other
-/// constraints are checked by [`DraftQuizContent::validate`].
+/// Text may be blank, the response mode may be missing or incomplete, and the
+/// tag limit is not enforced. [`DraftQuizContent::validate`] checks all of
+/// this.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DraftQuizContent {
     /// The question text.
-    prompt_text: String,
+    prompt_text: PromptText,
 
     /// Media presented alongside the question text.
     prompt_media: Option<Media>,
 
     /// The canonical answer.
-    canonical_answer: String,
+    canonical_answer: CanonicalAnswer,
 
     /// The response mode.
     response_mode: Option<ResponseMode>,
@@ -172,25 +170,24 @@ pub(crate) struct DraftQuizContent {
 
 impl DraftQuizContent {
     pub(crate) fn new(
-        prompt_text: impl Into<String>,
+        prompt_text: PromptText,
         prompt_media: Option<Media>,
-        canonical_answer: impl Into<String>,
+        canonical_answer: CanonicalAnswer,
         response_mode: Option<ResponseMode>,
         language: Language,
         tags: BTreeSet<Tag>,
-    ) -> Result<Self, DraftQuizContentError> {
-        let _ = (
-            prompt_text.into(),
+    ) -> Self {
+        Self {
+            prompt_text,
             prompt_media,
-            canonical_answer.into(),
+            canonical_answer,
             response_mode,
             language,
             tags,
-        );
-        todo!()
+        }
     }
 
-    pub(crate) fn prompt_text(&self) -> &str {
+    pub(crate) fn prompt_text(&self) -> &PromptText {
         &self.prompt_text
     }
 
@@ -198,7 +195,7 @@ impl DraftQuizContent {
         self.prompt_media
     }
 
-    pub(crate) fn canonical_answer(&self) -> &str {
+    pub(crate) fn canonical_answer(&self) -> &CanonicalAnswer {
         &self.canonical_answer
     }
 
@@ -220,24 +217,6 @@ impl DraftQuizContent {
     pub(crate) fn validate(&self) -> Result<QuizContent, Vec1<DraftQuizContentValidateError>> {
         todo!()
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum DraftQuizContentError {
-    #[error(
-        "prompt text must be at most {} characters, got {length}",
-        PromptText::MAX_LENGTH
-    )]
-    PromptTextTooLong { length: usize },
-    #[error("prompt text must not contain NUL")]
-    InvalidCharacterInPromptText,
-    #[error(
-        "canonical answer must be at most {} characters, got {length}",
-        CanonicalAnswer::MAX_LENGTH
-    )]
-    CanonicalAnswerTooLong { length: usize },
-    #[error("canonical answer must not contain NUL")]
-    InvalidCharacterInCanonicalAnswer,
 }
 
 /// A reason a draft cannot be published.
@@ -279,9 +258,10 @@ impl QuizContentId {
 
 /// One published version of a quiz's content.
 ///
-/// Guaranteed to carry a response mode ready for publication and at most 10
-/// tags. Session-specific behavior, such as how free-input responses are
-/// judged, is configured outside the aggregate.
+/// Guaranteed to carry a prompt text and a canonical answer that are not
+/// blank, a response mode ready for publication and at most 10 tags.
+/// Session-specific behavior, such as how free-input responses are judged, is
+/// configured outside the aggregate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuizContent {
     /// Identifies this version.
@@ -306,6 +286,20 @@ pub(crate) struct QuizContent {
 impl QuizContent {
     pub(crate) const MAX_TAGS: usize = 10;
 
+    fn check_prompt(prompt: &Prompt) -> Result<(), QuizContentError> {
+        if prompt.text().is_blank() {
+            return Err(QuizContentError::BlankPromptText);
+        }
+        Ok(())
+    }
+
+    fn check_canonical_answer(canonical_answer: &CanonicalAnswer) -> Result<(), QuizContentError> {
+        if canonical_answer.is_blank() {
+            return Err(QuizContentError::BlankCanonicalAnswer);
+        }
+        Ok(())
+    }
+
     fn check_response_mode(response_mode: &ResponseMode) -> Result<(), QuizContentError> {
         response_mode
             .validate()
@@ -329,6 +323,8 @@ impl QuizContent {
         language: Language,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizContentError> {
+        Self::check_prompt(&prompt)?;
+        Self::check_canonical_answer(&canonical_answer)?;
         Self::check_response_mode(&response_mode)?;
         Self::check_tags(&tags)?;
         Ok(Self {
@@ -353,6 +349,8 @@ impl QuizContent {
         language: Language,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizContentError> {
+        Self::check_prompt(&prompt)?;
+        Self::check_canonical_answer(&canonical_answer)?;
         Self::check_response_mode(&response_mode)?;
         Self::check_tags(&tags)?;
         Ok(Self {
@@ -392,6 +390,10 @@ impl QuizContent {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum QuizContentError {
+    #[error("prompt text must not be empty or only whitespace")]
+    BlankPromptText,
+    #[error("canonical answer must not be empty or only whitespace")]
+    BlankCanonicalAnswer,
     #[error("the response mode is not ready for publication")]
     InvalidResponseMode(Vec1<ResponseModeValidateError>),
     #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
@@ -594,17 +596,28 @@ mod tests {
     }
 
     fn new_content(
+        prompt_text: &str,
+        canonical_answer: &str,
         response_mode: ResponseMode,
         tags: BTreeSet<Tag>,
     ) -> Result<QuizContent, QuizContentError> {
         QuizContent::new(
-            Prompt::new(
-                PromptText::new("What is the capital of Japan?").unwrap(),
-                None,
-            ),
-            CanonicalAnswer::new("Tokyo").unwrap(),
+            Prompt::new(PromptText::new(prompt_text).unwrap(), None),
+            CanonicalAnswer::new(canonical_answer).unwrap(),
             response_mode,
             Language::Eng,
+            tags,
+        )
+    }
+
+    fn complete_content(
+        response_mode: ResponseMode,
+        tags: BTreeSet<Tag>,
+    ) -> Result<QuizContent, QuizContentError> {
+        new_content(
+            "What is the capital of Japan?",
+            "Tokyo",
+            response_mode,
             tags,
         )
     }
@@ -613,6 +626,23 @@ mod tests {
     fn accepts_text_within_bounds() {
         assert!(PromptText::new("x".repeat(1000)).is_ok());
         assert!(CanonicalAnswer::new("x".repeat(200)).is_ok());
+    }
+
+    #[test]
+    fn accepts_blank_text() {
+        for text in ["", " ", "\t\n", "\u{3000}"] {
+            assert!(PromptText::new(text).unwrap().is_blank(), "{text:?}");
+            assert!(CanonicalAnswer::new(text).unwrap().is_blank(), "{text:?}");
+        }
+        assert!(!PromptText::new(" x ").unwrap().is_blank());
+    }
+
+    #[test]
+    fn rejects_blank_text_over_the_limit() {
+        assert_eq!(
+            PromptText::new(" ".repeat(1001)),
+            Err(PromptTextError::TooLong { length: 1001 })
+        );
     }
 
     #[test]
@@ -634,22 +664,6 @@ mod tests {
             PromptText::new("あ".repeat(1001)),
             Err(PromptTextError::TooLong { length: 1001 })
         );
-    }
-
-    #[test]
-    fn rejects_blank_text() {
-        for text in ["", " ", "\t\n", "\u{3000}"] {
-            assert_eq!(
-                PromptText::new(text),
-                Err(PromptTextError::Blank),
-                "{text:?}"
-            );
-            assert_eq!(
-                CanonicalAnswer::new(text),
-                Err(CanonicalAnswerError::Blank),
-                "{text:?}"
-            );
-        }
     }
 
     #[test]
@@ -677,15 +691,27 @@ mod tests {
 
     #[test]
     fn creates_content_with_ten_tags() {
-        let content = new_content(free_input(), tags(10)).unwrap();
+        let content = complete_content(free_input(), tags(10)).unwrap();
 
         assert_eq!(content.tags().len(), 10);
     }
 
     #[test]
+    fn rejects_blank_content_text() {
+        assert_eq!(
+            new_content(" ", "Tokyo", free_input(), tags(0)),
+            Err(QuizContentError::BlankPromptText)
+        );
+        assert_eq!(
+            new_content("Q", "", free_input(), tags(0)),
+            Err(QuizContentError::BlankCanonicalAnswer)
+        );
+    }
+
+    #[test]
     fn rejects_more_than_ten_tags() {
         assert_eq!(
-            new_content(free_input(), tags(11)),
+            complete_content(free_input(), tags(11)),
             Err(QuizContentError::TooManyTags { count: 11 })
         );
     }
@@ -695,7 +721,7 @@ mod tests {
         let free_input = ResponseMode::FreeInput(FreeInput::new(BTreeSet::new()).unwrap());
 
         assert_eq!(
-            new_content(free_input, tags(0)),
+            complete_content(free_input, tags(0)),
             Err(QuizContentError::InvalidResponseMode(Vec1::from_one(
                 ResponseModeValidateError::NoExpectedAnswer
             )))
