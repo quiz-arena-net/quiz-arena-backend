@@ -356,8 +356,7 @@ impl QuizList {
     ///
     /// Only the owner may edit.
     pub(crate) fn editable_by(&self, user: UserId) -> bool {
-        let _ = user;
-        todo!()
+        user == self.owner
     }
 
     pub(crate) fn change_title(&mut self, title: QuizListTitle) {
@@ -369,8 +368,7 @@ impl QuizList {
     }
 
     pub(crate) fn change_visibility(&mut self, visibility: Visibility) {
-        let _ = visibility;
-        todo!()
+        self.visibility = visibility;
     }
 
     /// Inserts a quiz at `position`, or appends it when `position` is `None`.
@@ -381,16 +379,34 @@ impl QuizList {
         quiz_id: QuizId,
         position: Option<usize>,
     ) -> Result<(), AddQuizError> {
-        let _ = (quiz_id, position);
-        todo!()
+        let mut quiz_ids = self.entries.quiz_ids().to_vec();
+        let position = position.unwrap_or(quiz_ids.len());
+        if position > quiz_ids.len() {
+            return Err(AddQuizError::PositionOutOfRange { position });
+        }
+        quiz_ids.insert(position, quiz_id);
+        self.entries = QuizListEntries::new(quiz_ids).map_err(|error| match error {
+            QuizListEntriesError::DuplicateQuiz => AddQuizError::DuplicateQuiz,
+            QuizListEntriesError::TooManyQuizzes { count } => {
+                AddQuizError::TooManyQuizzes { count }
+            }
+        })?;
+        Ok(())
     }
 
     /// Removes a quiz from the list.
     ///
     /// Replaces the entries with a new version.
     pub(crate) fn remove_quiz(&mut self, quiz_id: QuizId) -> Result<(), RemoveQuizError> {
-        let _ = quiz_id;
-        todo!()
+        let mut quiz_ids = self.entries.quiz_ids().to_vec();
+        let position = quiz_ids
+            .iter()
+            .position(|current| *current == quiz_id)
+            .ok_or(RemoveQuizError::QuizNotFound)?;
+        quiz_ids.remove(position);
+        self.entries = QuizListEntries::new(quiz_ids)
+            .expect("removing a quiz keeps the entries within their invariants");
+        Ok(())
     }
 
     /// Replaces the order of the quizzes.
@@ -398,8 +414,15 @@ impl QuizList {
     /// Replaces the entries with a new version. `order` must be a permutation
     /// of the current quizzes.
     pub(crate) fn reorder(&mut self, order: Vec<QuizId>) -> Result<(), ReorderError> {
-        let _ = order;
-        todo!()
+        let current = self.entries.quiz_ids();
+        let is_permutation = order.len() == current.len()
+            && order.iter().collect::<BTreeSet<_>>() == current.iter().collect::<BTreeSet<_>>();
+        if !is_permutation {
+            return Err(ReorderError::NotAPermutation);
+        }
+        self.entries = QuizListEntries::new(order)
+            .expect("a permutation of the entries keeps them within their invariants");
+        Ok(())
     }
 
     /// Replaces the tags.
@@ -622,6 +645,148 @@ mod tests {
             quiz_list.change_tags(tags(11)),
             Err(ChangeTagsError::TooManyTags { count: 11 })
         );
+        assert_eq!(quiz_list, before);
+    }
+
+    #[test]
+    fn only_the_owner_may_edit() {
+        let quiz_list = new_quiz_list(Vec::new(), tags(0)).unwrap();
+
+        assert!(quiz_list.editable_by(quiz_list.owner()));
+        assert!(!quiz_list.editable_by(UserId::from_uuid(Uuid::now_v7())));
+    }
+
+    #[test]
+    fn changes_visibility() {
+        let mut quiz_list = new_quiz_list(Vec::new(), tags(0)).unwrap();
+
+        quiz_list.change_visibility(Visibility::Public);
+
+        assert_eq!(quiz_list.visibility(), Visibility::Public);
+    }
+
+    #[test]
+    fn appends_a_quiz() {
+        let ids = quiz_ids(2);
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let first_version = quiz_list.entries().id();
+        let quiz_id = QuizId::new();
+
+        quiz_list.add_quiz(quiz_id, None).unwrap();
+
+        assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], ids[1], quiz_id]);
+        assert_ne!(quiz_list.entries().id(), first_version);
+    }
+
+    #[test]
+    fn inserts_a_quiz_at_a_position() {
+        let ids = quiz_ids(2);
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let quiz_id = QuizId::new();
+
+        quiz_list.add_quiz(quiz_id, Some(1)).unwrap();
+
+        assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], quiz_id, ids[1]]);
+    }
+
+    #[test]
+    fn inserts_a_quiz_at_the_end_position() {
+        let ids = quiz_ids(2);
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let quiz_id = QuizId::new();
+
+        quiz_list.add_quiz(quiz_id, Some(2)).unwrap();
+
+        assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], ids[1], quiz_id]);
+    }
+
+    #[test]
+    fn rejects_a_position_beyond_the_end() {
+        let mut quiz_list = new_quiz_list(quiz_ids(2), tags(0)).unwrap();
+        let before = quiz_list.clone();
+
+        assert_eq!(
+            quiz_list.add_quiz(QuizId::new(), Some(3)),
+            Err(AddQuizError::PositionOutOfRange { position: 3 })
+        );
+        assert_eq!(quiz_list, before);
+    }
+
+    #[test]
+    fn rejects_adding_a_quiz_twice() {
+        let ids = quiz_ids(2);
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let before = quiz_list.clone();
+
+        assert_eq!(
+            quiz_list.add_quiz(ids[0], None),
+            Err(AddQuizError::DuplicateQuiz)
+        );
+        assert_eq!(quiz_list, before);
+    }
+
+    #[test]
+    fn rejects_adding_beyond_the_limit() {
+        let mut quiz_list = new_quiz_list(quiz_ids(100), tags(0)).unwrap();
+        let before = quiz_list.clone();
+
+        assert_eq!(
+            quiz_list.add_quiz(QuizId::new(), None),
+            Err(AddQuizError::TooManyQuizzes { count: 101 })
+        );
+        assert_eq!(quiz_list, before);
+    }
+
+    #[test]
+    fn removes_a_quiz() {
+        let ids = quiz_ids(3);
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let first_version = quiz_list.entries().id();
+
+        quiz_list.remove_quiz(ids[1]).unwrap();
+
+        assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], ids[2]]);
+        assert_ne!(quiz_list.entries().id(), first_version);
+    }
+
+    #[test]
+    fn rejects_removing_an_absent_quiz() {
+        let mut quiz_list = new_quiz_list(quiz_ids(2), tags(0)).unwrap();
+        let before = quiz_list.clone();
+
+        assert_eq!(
+            quiz_list.remove_quiz(QuizId::new()),
+            Err(RemoveQuizError::QuizNotFound)
+        );
+        assert_eq!(quiz_list, before);
+    }
+
+    #[test]
+    fn reorders_the_quizzes() {
+        let ids = quiz_ids(3);
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let first_version = quiz_list.entries().id();
+
+        quiz_list.reorder(vec![ids[2], ids[0], ids[1]]).unwrap();
+
+        assert_eq!(quiz_list.entries().quiz_ids(), [ids[2], ids[0], ids[1]]);
+        assert_ne!(quiz_list.entries().id(), first_version);
+    }
+
+    #[test]
+    fn rejects_an_order_that_is_not_a_permutation() {
+        let ids = quiz_ids(3);
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let before = quiz_list.clone();
+
+        for order in [
+            vec![ids[0], ids[1]],
+            vec![ids[0], ids[1], ids[2], QuizId::new()],
+            vec![ids[0], ids[1], QuizId::new()],
+            vec![ids[0], ids[0], ids[1]],
+        ] {
+            assert_eq!(quiz_list.reorder(order), Err(ReorderError::NotAPermutation));
+        }
         assert_eq!(quiz_list, before);
     }
 }
