@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::{
     media::Media,
-    response_mode::{DraftResponseMode, ImageChoice, ResponseMode, TextChoice},
+    response_mode::{ResponseMode, ResponseModeValidateError},
     tag::Tag,
     user::UserId,
 };
@@ -161,7 +161,7 @@ pub(crate) struct DraftQuizContent {
     canonical_answer: String,
 
     /// The response mode.
-    response_mode: Option<DraftResponseMode>,
+    response_mode: Option<ResponseMode>,
 
     /// The language of the quiz.
     language: Language,
@@ -175,7 +175,7 @@ impl DraftQuizContent {
         prompt_text: impl Into<String>,
         prompt_media: Option<Media>,
         canonical_answer: impl Into<String>,
-        response_mode: Option<DraftResponseMode>,
+        response_mode: Option<ResponseMode>,
         language: Language,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, DraftQuizContentError> {
@@ -202,7 +202,7 @@ impl DraftQuizContent {
         &self.canonical_answer
     }
 
-    pub(crate) fn response_mode(&self) -> Option<&DraftResponseMode> {
+    pub(crate) fn response_mode(&self) -> Option<&ResponseMode> {
         self.response_mode.as_ref()
     }
 
@@ -241,9 +241,6 @@ pub(crate) enum DraftQuizContentError {
 }
 
 /// A reason a draft cannot be published.
-///
-/// Positions of character choices are zero-based indexes into
-/// [`DraftCharacterChoices::choices`](super::response_mode::DraftCharacterChoices::choices).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum DraftQuizContentValidateError {
     #[error("prompt text must not be empty or only whitespace")]
@@ -254,36 +251,8 @@ pub(crate) enum DraftQuizContentValidateError {
     NoResponseMode,
     #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
     TooManyTags { count: usize },
-    #[error("a free input must have at least one expected answer")]
-    FreeInputNoExpectedAnswer,
-    #[error("a text choice must have at least one correct answer")]
-    TextChoiceNoCorrectAnswer,
-    #[error("a text choice answer must not be both correct and wrong")]
-    TextChoiceAnswerBothCorrectAndWrong,
-    #[error(
-        "a text choice must have at most {} answers, got {count}",
-        TextChoice::MAX_ANSWERS
-    )]
-    TextChoiceTooManyAnswers { count: usize },
-    #[error("an image choice must have at least one correct answer")]
-    ImageChoiceNoCorrectAnswer,
-    #[error("an image must not appear in more than one image choice answer")]
-    ImageChoiceDuplicateImage,
-    #[error(
-        "an image choice must have at most {} answers, got {count}",
-        ImageChoice::MAX_ANSWERS
-    )]
-    ImageChoiceTooManyAnswers { count: usize },
-    #[error("character choices must have at least one position")]
-    CharacterChoicesNoPosition,
-    #[error("character choice at position {position} must have a correct character")]
-    CharacterChoiceNoCorrectCharacter { position: usize },
-    #[error("character choice at position {position} must have at least one wrong character")]
-    CharacterChoiceNoWrongCharacter { position: usize },
-    #[error(
-        "character choice at position {position} must not have its correct character among the wrong ones"
-    )]
-    CharacterChoiceCorrectChoiceAmongWrongChoices { position: usize },
+    #[error("the response mode is not ready for publication")]
+    InvalidResponseMode(ResponseModeValidateError),
 }
 
 /// Identifies one published version of a quiz's content.
@@ -310,8 +279,9 @@ impl QuizContentId {
 
 /// One published version of a quiz's content.
 ///
-/// Guaranteed to carry at most 10 tags. Session-specific behavior, such as how
-/// free-input responses are judged, is configured outside the aggregate.
+/// Guaranteed to carry a response mode ready for publication and at most 10
+/// tags. Session-specific behavior, such as how free-input responses are
+/// judged, is configured outside the aggregate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuizContent {
     /// Identifies this version.
@@ -336,6 +306,12 @@ pub(crate) struct QuizContent {
 impl QuizContent {
     pub(crate) const MAX_TAGS: usize = 10;
 
+    fn check_response_mode(response_mode: &ResponseMode) -> Result<(), QuizContentError> {
+        response_mode
+            .validate()
+            .map_err(QuizContentError::InvalidResponseMode)
+    }
+
     fn check_tags(tags: &BTreeSet<Tag>) -> Result<(), QuizContentError> {
         let count = tags.len();
         if count > Self::MAX_TAGS {
@@ -353,6 +329,7 @@ impl QuizContent {
         language: Language,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizContentError> {
+        Self::check_response_mode(&response_mode)?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id: QuizContentId::new(),
@@ -376,6 +353,7 @@ impl QuizContent {
         language: Language,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizContentError> {
+        Self::check_response_mode(&response_mode)?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id,
@@ -412,8 +390,10 @@ impl QuizContent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum QuizContentError {
+    #[error("the response mode is not ready for publication")]
+    InvalidResponseMode(Vec1<ResponseModeValidateError>),
     #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
     TooManyTags { count: usize },
 }
@@ -598,14 +578,12 @@ pub(crate) enum PublishError {
 
 #[cfg(test)]
 mod tests {
-    use mitsein::btree_set1::BTreeSet1;
-
     use super::*;
     use crate::domain::response_mode::{FreeInput, FreeInputAnswer};
 
     fn free_input() -> ResponseMode {
         ResponseMode::FreeInput(
-            FreeInput::new(BTreeSet1::from_one(FreeInputAnswer::new("Tokyo").unwrap())).unwrap(),
+            FreeInput::new(BTreeSet::from([FreeInputAnswer::new("Tokyo").unwrap()])).unwrap(),
         )
     }
 
@@ -709,6 +687,18 @@ mod tests {
         assert_eq!(
             new_content(free_input(), tags(11)),
             Err(QuizContentError::TooManyTags { count: 11 })
+        );
+    }
+
+    #[test]
+    fn rejects_an_incomplete_response_mode() {
+        let free_input = ResponseMode::FreeInput(FreeInput::new(BTreeSet::new()).unwrap());
+
+        assert_eq!(
+            new_content(free_input, tags(0)),
+            Err(QuizContentError::InvalidResponseMode(Vec1::from_one(
+                ResponseModeValidateError::FreeInputNoExpectedAnswer
+            )))
         );
     }
 }

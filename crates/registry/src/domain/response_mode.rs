@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use mitsein::{btree_set1::BTreeSet1, vec1::Vec1};
+use mitsein::vec1::Vec1;
 
 use super::media::{Media, MediaKind};
 
@@ -51,50 +51,30 @@ pub(crate) enum FreeInputAnswerError {
     InvalidCharacter,
 }
 
-/// A [`FreeInput`] that may still be incomplete.
-///
-/// The expected answers may be empty.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DraftFreeInput {
-    /// Reference answers for judging.
-    expected_answers: BTreeSet<FreeInputAnswer>,
-}
-
-impl DraftFreeInput {
-    pub(crate) fn new(expected_answers: BTreeSet<FreeInputAnswer>) -> Self {
-        Self { expected_answers }
-    }
-
-    pub(crate) fn expected_answers(&self) -> &BTreeSet<FreeInputAnswer> {
-        &self.expected_answers
-    }
-}
-
 /// The player provides an unrestricted textual response.
 ///
-/// Guaranteed to hold at most 20 expected answers.
+/// Guaranteed to hold at most 20 expected answers. The expected answers may be
+/// empty.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct FreeInput {
     /// Reference answers for judging.
     ///
     /// The actual judging strategy is configured separately by the session.
-    expected_answers: BTreeSet1<FreeInputAnswer>,
+    expected_answers: BTreeSet<FreeInputAnswer>,
 }
 
 impl FreeInput {
     pub(crate) const MAX_EXPECTED_ANSWERS: usize = 20;
 
-    pub(crate) fn new(
-        expected_answers: BTreeSet1<FreeInputAnswer>,
-    ) -> Result<Self, FreeInputError> {
-        let count = expected_answers.len().get();
+    pub(crate) fn new(expected_answers: BTreeSet<FreeInputAnswer>) -> Result<Self, FreeInputError> {
+        let count = expected_answers.len();
         if count > Self::MAX_EXPECTED_ANSWERS {
             return Err(FreeInputError::TooManyExpectedAnswers { count });
         }
         Ok(Self { expected_answers })
     }
 
-    pub(crate) fn expected_answers(&self) -> &BTreeSet1<FreeInputAnswer> {
+    pub(crate) fn expected_answers(&self) -> &BTreeSet<FreeInputAnswer> {
         &self.expected_answers
     }
 }
@@ -162,58 +142,17 @@ pub(crate) enum TextChoiceAnswerError {
     InvalidCharacter,
 }
 
-/// A [`TextChoice`] that may still be incomplete.
-///
-/// The correct answers may be empty, an answer may be both correct and wrong,
-/// and the answer limit is not enforced.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DraftTextChoice {
-    /// Determines whether one or all correct answers must be selected.
-    choice_requirement: ChoiceRequirement,
-
-    /// Choices that are considered correct.
-    correct_answers: BTreeSet<TextChoiceAnswer>,
-
-    /// Choices that are considered incorrect.
-    wrong_answers: BTreeSet<TextChoiceAnswer>,
-}
-
-impl DraftTextChoice {
-    pub(crate) fn new(
-        choice_requirement: ChoiceRequirement,
-        correct_answers: BTreeSet<TextChoiceAnswer>,
-        wrong_answers: BTreeSet<TextChoiceAnswer>,
-    ) -> Self {
-        Self {
-            choice_requirement,
-            correct_answers,
-            wrong_answers,
-        }
-    }
-
-    pub(crate) fn choice_requirement(&self) -> ChoiceRequirement {
-        self.choice_requirement
-    }
-
-    pub(crate) fn correct_answers(&self) -> &BTreeSet<TextChoiceAnswer> {
-        &self.correct_answers
-    }
-
-    pub(crate) fn wrong_answers(&self) -> &BTreeSet<TextChoiceAnswer> {
-        &self.wrong_answers
-    }
-}
-
 /// The player selects from a collection of predefined text answers.
 ///
 /// Guaranteed to hold at most 6 answers, none of them both correct and wrong.
+/// The correct answers may be empty.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct TextChoice {
     /// Determines whether one or all correct answers must be selected.
     choice_requirement: ChoiceRequirement,
 
     /// Choices that are considered correct.
-    correct_answers: BTreeSet1<TextChoiceAnswer>,
+    correct_answers: BTreeSet<TextChoiceAnswer>,
 
     /// Choices that are considered incorrect.
     ///
@@ -227,13 +166,13 @@ impl TextChoice {
 
     pub(crate) fn new(
         choice_requirement: ChoiceRequirement,
-        correct_answers: BTreeSet1<TextChoiceAnswer>,
+        correct_answers: BTreeSet<TextChoiceAnswer>,
         wrong_answers: BTreeSet<TextChoiceAnswer>,
     ) -> Result<Self, TextChoiceError> {
         if !correct_answers.is_disjoint(&wrong_answers) {
             return Err(TextChoiceError::AnswerBothCorrectAndWrong);
         }
-        let count = correct_answers.len().get() + wrong_answers.len();
+        let count = correct_answers.len() + wrong_answers.len();
         if count > Self::MAX_ANSWERS {
             return Err(TextChoiceError::TooManyAnswers { count });
         }
@@ -248,7 +187,7 @@ impl TextChoice {
         self.choice_requirement
     }
 
-    pub(crate) fn correct_answers(&self) -> &BTreeSet1<TextChoiceAnswer> {
+    pub(crate) fn correct_answers(&self) -> &BTreeSet<TextChoiceAnswer> {
         &self.correct_answers
     }
 
@@ -350,59 +289,18 @@ pub(crate) enum ImageChoiceAnswerError {
     NotAnImage,
 }
 
-/// An [`ImageChoice`] that may still be incomplete.
-///
-/// The correct answers may be empty, an image may appear twice, and the answer
-/// limit is not enforced.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DraftImageChoice {
-    /// Determines whether one or all correct answers must be selected.
-    choice_requirement: ChoiceRequirement,
-
-    /// Choices that are considered correct.
-    correct_answers: BTreeSet<ImageChoiceAnswer>,
-
-    /// Choices that are considered incorrect.
-    wrong_answers: BTreeSet<ImageChoiceAnswer>,
-}
-
-impl DraftImageChoice {
-    pub(crate) fn new(
-        choice_requirement: ChoiceRequirement,
-        correct_answers: BTreeSet<ImageChoiceAnswer>,
-        wrong_answers: BTreeSet<ImageChoiceAnswer>,
-    ) -> Self {
-        Self {
-            choice_requirement,
-            correct_answers,
-            wrong_answers,
-        }
-    }
-
-    pub(crate) fn choice_requirement(&self) -> ChoiceRequirement {
-        self.choice_requirement
-    }
-
-    pub(crate) fn correct_answers(&self) -> &BTreeSet<ImageChoiceAnswer> {
-        &self.correct_answers
-    }
-
-    pub(crate) fn wrong_answers(&self) -> &BTreeSet<ImageChoiceAnswer> {
-        &self.wrong_answers
-    }
-}
-
 /// The player selects from a collection of predefined image answers.
 ///
-/// Guaranteed to hold at most 4 answers, no two of them with the same image.
-/// So no answer is both correct and wrong.
+/// Guaranteed to hold at most 4 answers, no two of them with the same image,
+/// which also keeps every answer from being both correct and wrong. The correct
+/// answers may be empty.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ImageChoice {
     /// Determines whether one or all correct answers must be selected.
     choice_requirement: ChoiceRequirement,
 
     /// Choices that are considered correct.
-    correct_answers: BTreeSet1<ImageChoiceAnswer>,
+    correct_answers: BTreeSet<ImageChoiceAnswer>,
 
     /// Choices that are considered incorrect.
     ///
@@ -416,7 +314,7 @@ impl ImageChoice {
 
     pub(crate) fn new(
         choice_requirement: ChoiceRequirement,
-        correct_answers: BTreeSet1<ImageChoiceAnswer>,
+        correct_answers: BTreeSet<ImageChoiceAnswer>,
         wrong_answers: BTreeSet<ImageChoiceAnswer>,
     ) -> Result<Self, ImageChoiceError> {
         let mut images = BTreeSet::new();
@@ -440,7 +338,7 @@ impl ImageChoice {
         self.choice_requirement
     }
 
-    pub(crate) fn correct_answers(&self) -> &BTreeSet1<ImageChoiceAnswer> {
+    pub(crate) fn correct_answers(&self) -> &BTreeSet<ImageChoiceAnswer> {
         &self.correct_answers
     }
 
@@ -485,12 +383,13 @@ pub(crate) enum CharacterError {
     Invalid,
 }
 
-/// A [`CharacterChoice`] that may still be incomplete.
+/// The choices presented for one position in a character-by-character response.
 ///
-/// The correct choice may be missing, the wrong choices may be empty, and the
-/// correct choice may also appear among the wrong ones.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DraftCharacterChoice {
+/// One choice is correct. The remaining choices are distractors, and none of
+/// them equals the correct one. Guaranteed to hold at most 9 wrong choices.
+/// The correct choice may be missing and the wrong choices may be empty.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct CharacterChoice {
     /// The correct character for this position.
     correct_choice: Option<Character>,
 
@@ -498,51 +397,17 @@ pub(crate) struct DraftCharacterChoice {
     wrong_choices: BTreeSet<Character>,
 }
 
-impl DraftCharacterChoice {
-    pub(crate) fn new(
-        correct_choice: Option<Character>,
-        wrong_choices: BTreeSet<Character>,
-    ) -> Self {
-        Self {
-            correct_choice,
-            wrong_choices,
-        }
-    }
-
-    pub(crate) fn correct_choice(&self) -> Option<Character> {
-        self.correct_choice
-    }
-
-    pub(crate) fn wrong_choices(&self) -> &BTreeSet<Character> {
-        &self.wrong_choices
-    }
-}
-
-/// The choices presented for one position in a character-by-character response.
-///
-/// Exactly one choice is correct. The remaining choices are distractors, and
-/// none of them equals the correct one. Guaranteed to hold at most 9 wrong
-/// choices.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct CharacterChoice {
-    /// The correct character for this position.
-    correct_choice: Character,
-
-    /// Incorrect characters that may be presented alongside the correct one.
-    wrong_choices: BTreeSet1<Character>,
-}
-
 impl CharacterChoice {
     pub(crate) const MAX_WRONG_CHOICES: usize = 9;
 
     pub(crate) fn new(
-        correct_choice: Character,
-        wrong_choices: BTreeSet1<Character>,
+        correct_choice: Option<Character>,
+        wrong_choices: BTreeSet<Character>,
     ) -> Result<Self, CharacterChoiceError> {
-        if wrong_choices.contains(&correct_choice) {
+        if correct_choice.is_some_and(|correct_choice| wrong_choices.contains(&correct_choice)) {
             return Err(CharacterChoiceError::CorrectChoiceAmongWrongChoices);
         }
-        let count = wrong_choices.len().get();
+        let count = wrong_choices.len();
         if count > Self::MAX_WRONG_CHOICES {
             return Err(CharacterChoiceError::TooManyWrongChoices { count });
         }
@@ -552,11 +417,11 @@ impl CharacterChoice {
         })
     }
 
-    pub(crate) fn correct_choice(&self) -> Character {
+    pub(crate) fn correct_choice(&self) -> Option<Character> {
         self.correct_choice
     }
 
-    pub(crate) fn wrong_choices(&self) -> &BTreeSet1<Character> {
+    pub(crate) fn wrong_choices(&self) -> &BTreeSet<Character> {
         &self.wrong_choices
     }
 }
@@ -572,53 +437,31 @@ pub(crate) enum CharacterChoiceError {
     TooManyWrongChoices { count: usize },
 }
 
-/// A [`CharacterChoices`] that may still be incomplete.
-///
-/// The positions may be empty.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DraftCharacterChoices {
-    /// The choices for each position.
-    ///
-    /// The order is significant as it corresponds to the order of characters in
-    /// the answer.
-    choices: Vec<DraftCharacterChoice>,
-}
-
-impl DraftCharacterChoices {
-    pub(crate) fn new(choices: Vec<DraftCharacterChoice>) -> Self {
-        Self { choices }
-    }
-
-    pub(crate) fn choices(&self) -> &[DraftCharacterChoice] {
-        &self.choices
-    }
-}
-
 /// The player constructs the answer one character at a time by selecting from a
 /// set of candidate characters at each position.
 ///
-/// Guaranteed to hold at most 50 positions.
+/// Guaranteed to hold at most 50 positions. The positions may be empty.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct CharacterChoices {
     /// The choices for each position.
     ///
     /// The order is significant as it corresponds to the order of characters in
     /// the answer.
-    choices: Vec1<CharacterChoice>,
+    choices: Vec<CharacterChoice>,
 }
 
 impl CharacterChoices {
     pub(crate) const MAX_POSITIONS: usize = 50;
 
-    pub(crate) fn new(choices: Vec1<CharacterChoice>) -> Result<Self, CharacterChoicesError> {
-        let count = choices.len().get();
+    pub(crate) fn new(choices: Vec<CharacterChoice>) -> Result<Self, CharacterChoicesError> {
+        let count = choices.len();
         if count > Self::MAX_POSITIONS {
             return Err(CharacterChoicesError::TooManyPositions { count });
         }
         Ok(Self { choices })
     }
 
-    pub(crate) fn choices(&self) -> &Vec1<CharacterChoice> {
+    pub(crate) fn choices(&self) -> &[CharacterChoice] {
         &self.choices
     }
 }
@@ -632,19 +475,6 @@ pub(crate) enum CharacterChoicesError {
     TooManyPositions { count: usize },
 }
 
-/// A [`ResponseMode`] that may still be incomplete.
-///
-/// Each variant relaxes the non-emptiness constraints of its counterpart.
-/// Individual answers are the validated value types, so a draft holds either a
-/// complete answer or none.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DraftResponseMode {
-    FreeInput(DraftFreeInput),
-    TextChoice(DraftTextChoice),
-    ImageChoice(DraftImageChoice),
-    CharacterChoices(DraftCharacterChoices),
-}
-
 /// The way in which players respond to a quiz.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ResponseMode {
@@ -652,6 +482,75 @@ pub(crate) enum ResponseMode {
     TextChoice(TextChoice),
     ImageChoice(ImageChoice),
     CharacterChoices(CharacterChoices),
+}
+
+impl ResponseMode {
+    /// Checks whether this response mode is ready for publication.
+    ///
+    /// Returns all violations instead of stopping at the first one.
+    pub(crate) fn validate(&self) -> Result<(), Vec1<ResponseModeValidateError>> {
+        let mut errors = Vec::new();
+        match self {
+            Self::FreeInput(free_input) => {
+                if free_input.expected_answers.is_empty() {
+                    errors.push(ResponseModeValidateError::FreeInputNoExpectedAnswer);
+                }
+            }
+            Self::TextChoice(text_choice) => {
+                if text_choice.correct_answers.is_empty() {
+                    errors.push(ResponseModeValidateError::TextChoiceNoCorrectAnswer);
+                }
+            }
+            Self::ImageChoice(image_choice) => {
+                if image_choice.correct_answers.is_empty() {
+                    errors.push(ResponseModeValidateError::ImageChoiceNoCorrectAnswer);
+                }
+            }
+            Self::CharacterChoices(character_choices) => {
+                if character_choices.choices.is_empty() {
+                    errors.push(ResponseModeValidateError::CharacterChoicesNoPosition);
+                }
+                for (position, choice) in character_choices.choices.iter().enumerate() {
+                    if choice.correct_choice.is_none() {
+                        errors.push(
+                            ResponseModeValidateError::CharacterChoiceNoCorrectCharacter {
+                                position,
+                            },
+                        );
+                    }
+                    if choice.wrong_choices.is_empty() {
+                        errors.push(ResponseModeValidateError::CharacterChoiceNoWrongCharacter {
+                            position,
+                        });
+                    }
+                }
+            }
+        }
+        match Vec1::try_from(errors) {
+            Ok(errors) => Err(errors),
+            Err(_) => Ok(()),
+        }
+    }
+}
+
+/// A reason a response mode cannot be published.
+///
+/// Positions of character choices are zero-based indexes into
+/// [`CharacterChoices::choices`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum ResponseModeValidateError {
+    #[error("a free input must have at least one expected answer")]
+    FreeInputNoExpectedAnswer,
+    #[error("a text choice must have at least one correct answer")]
+    TextChoiceNoCorrectAnswer,
+    #[error("an image choice must have at least one correct answer")]
+    ImageChoiceNoCorrectAnswer,
+    #[error("character choices must have at least one position")]
+    CharacterChoicesNoPosition,
+    #[error("character choice at position {position} must have a correct character")]
+    CharacterChoiceNoCorrectCharacter { position: usize },
+    #[error("character choice at position {position} must have at least one wrong character")]
+    CharacterChoiceNoWrongCharacter { position: usize },
 }
 
 #[cfg(test)]
@@ -750,10 +649,10 @@ mod tests {
 
     #[test]
     fn rejects_correct_character_among_wrong_choices() {
-        let wrong_choices = BTreeSet1::from_head_and_tail(character('a'), [character('b')]);
+        let wrong_choices = BTreeSet::from([character('a'), character('b')]);
 
         assert_eq!(
-            CharacterChoice::new(character('a'), wrong_choices),
+            CharacterChoice::new(Some(character('a')), wrong_choices),
             Err(CharacterChoiceError::CorrectChoiceAmongWrongChoices)
         );
     }
@@ -761,18 +660,19 @@ mod tests {
     #[test]
     fn accepts_distinct_character_choices() {
         let choice =
-            CharacterChoice::new(character('a'), BTreeSet1::from_one(character('b'))).unwrap();
+            CharacterChoice::new(Some(character('a')), BTreeSet::from([character('b')])).unwrap();
 
-        assert_eq!(choice.correct_choice(), character('a'));
+        assert_eq!(choice.correct_choice(), Some(character('a')));
     }
 
     #[test]
     fn rejects_more_than_twenty_expected_answers() {
         let free_input = |count: usize| {
-            FreeInput::new(BTreeSet1::from_head_and_tail(
-                FreeInputAnswer::new("answer0").unwrap(),
-                (1..count).map(|index| FreeInputAnswer::new(format!("answer{index}")).unwrap()),
-            ))
+            FreeInput::new(
+                (0..count)
+                    .map(|index| FreeInputAnswer::new(format!("answer{index}")).unwrap())
+                    .collect(),
+            )
         };
 
         assert!(free_input(20).is_ok());
@@ -786,11 +686,10 @@ mod tests {
     fn rejects_more_than_nine_wrong_choices() {
         let choice = |count: usize| {
             CharacterChoice::new(
-                character('a'),
-                BTreeSet1::from_head_and_tail(
-                    character('b'),
-                    (1..count).map(|index| character(char::from(b'b' + index as u8))),
-                ),
+                Some(character('a')),
+                (0..count)
+                    .map(|index| character(char::from(b'b' + index as u8)))
+                    .collect(),
             )
         };
 
@@ -803,14 +702,11 @@ mod tests {
 
     #[test]
     fn rejects_more_than_fifty_positions() {
-        let position =
-            || CharacterChoice::new(character('a'), BTreeSet1::from_one(character('b'))).unwrap();
-        let choices = |count: usize| {
-            CharacterChoices::new(Vec1::from_head_and_tail(
-                position(),
-                (1..count).map(|_| position()),
-            ))
+        let position = || {
+            CharacterChoice::new(Some(character('a')), BTreeSet::from([character('b')])).unwrap()
         };
+        let choices =
+            |count: usize| CharacterChoices::new((0..count).map(|_| position()).collect());
 
         assert!(choices(50).is_ok());
         assert_eq!(
@@ -826,7 +722,7 @@ mod tests {
         assert_eq!(
             TextChoice::new(
                 ChoiceRequirement::All,
-                BTreeSet1::from_one(tokyo.clone()),
+                BTreeSet::from([tokyo.clone()]),
                 BTreeSet::from([tokyo]),
             ),
             Err(TextChoiceError::AnswerBothCorrectAndWrong)
@@ -838,7 +734,7 @@ mod tests {
         assert!(
             TextChoice::new(
                 ChoiceRequirement::All,
-                BTreeSet1::from_one(TextChoiceAnswer::new("Tokyo").unwrap()),
+                BTreeSet::from([TextChoiceAnswer::new("Tokyo").unwrap()]),
                 BTreeSet::new(),
             )
             .is_ok()
@@ -850,7 +746,7 @@ mod tests {
         let text_choice = |wrong_count: usize| {
             TextChoice::new(
                 ChoiceRequirement::One,
-                BTreeSet1::from_one(TextChoiceAnswer::new("correct").unwrap()),
+                BTreeSet::from([TextChoiceAnswer::new("correct").unwrap()]),
                 (0..wrong_count)
                     .map(|index| TextChoiceAnswer::new(format!("wrong{index}")).unwrap())
                     .collect(),
@@ -888,7 +784,7 @@ mod tests {
         let image_choice = |wrong_count: usize| {
             ImageChoice::new(
                 ChoiceRequirement::One,
-                BTreeSet1::from_one(image_answer()),
+                BTreeSet::from([image_answer()]),
                 (0..wrong_count).map(|_| image_answer()).collect(),
             )
         };
@@ -910,7 +806,7 @@ mod tests {
         assert_eq!(
             ImageChoice::new(
                 ChoiceRequirement::All,
-                BTreeSet1::from_head_and_tail(plain.clone(), [labelled]),
+                BTreeSet::from([plain.clone(), labelled]),
                 BTreeSet::new(),
             ),
             Err(ImageChoiceError::DuplicateImage)
@@ -918,10 +814,84 @@ mod tests {
         assert_eq!(
             ImageChoice::new(
                 ChoiceRequirement::One,
-                BTreeSet1::from_one(plain.clone()),
+                BTreeSet::from([plain.clone()]),
                 BTreeSet::from([plain]),
             ),
             Err(ImageChoiceError::DuplicateImage)
+        );
+    }
+
+    #[test]
+    fn validates_a_complete_response_mode() {
+        let free_input =
+            FreeInput::new(BTreeSet::from([FreeInputAnswer::new("Tokyo").unwrap()])).unwrap();
+
+        assert_eq!(ResponseMode::FreeInput(free_input).validate(), Ok(()));
+    }
+
+    #[test]
+    fn reports_a_blank_free_input() {
+        let free_input = FreeInput::new(BTreeSet::new()).unwrap();
+
+        assert_eq!(
+            ResponseMode::FreeInput(free_input).validate(),
+            Err(Vec1::from_one(
+                ResponseModeValidateError::FreeInputNoExpectedAnswer
+            ))
+        );
+    }
+
+    #[test]
+    fn reports_a_choice_without_correct_answers() {
+        let text_choice = TextChoice::new(
+            ChoiceRequirement::One,
+            BTreeSet::new(),
+            BTreeSet::from([TextChoiceAnswer::new("Kyoto").unwrap()]),
+        )
+        .unwrap();
+        let image_choice =
+            ImageChoice::new(ChoiceRequirement::One, BTreeSet::new(), BTreeSet::new()).unwrap();
+
+        assert_eq!(
+            ResponseMode::TextChoice(text_choice).validate(),
+            Err(Vec1::from_one(
+                ResponseModeValidateError::TextChoiceNoCorrectAnswer
+            ))
+        );
+        assert_eq!(
+            ResponseMode::ImageChoice(image_choice).validate(),
+            Err(Vec1::from_one(
+                ResponseModeValidateError::ImageChoiceNoCorrectAnswer
+            ))
+        );
+    }
+
+    #[test]
+    fn reports_every_blank_in_character_choices() {
+        let empty = CharacterChoices::new(Vec::new()).unwrap();
+        let blank_positions = CharacterChoices::new(vec![
+            CharacterChoice::new(None, BTreeSet::from([character('b')])).unwrap(),
+            CharacterChoice::new(Some(character('a')), BTreeSet::new()).unwrap(),
+            CharacterChoice::new(None, BTreeSet::new()).unwrap(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            ResponseMode::CharacterChoices(empty).validate(),
+            Err(Vec1::from_one(
+                ResponseModeValidateError::CharacterChoicesNoPosition
+            ))
+        );
+        assert_eq!(
+            ResponseMode::CharacterChoices(blank_positions).validate(),
+            Err(Vec1::from_head_and_tail(
+                ResponseModeValidateError::CharacterChoiceNoCorrectCharacter { position: 0 },
+                [
+                    ResponseModeValidateError::CharacterChoiceNoWrongCharacter { position: 1 },
+                    ResponseModeValidateError::CharacterChoiceNoCorrectCharacter { position: 2 },
+                    ResponseModeValidateError::CharacterChoiceNoWrongCharacter { position: 2 },
+                ]
+            ))
         );
     }
 }
