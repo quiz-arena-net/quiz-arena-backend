@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use mitsein::vec1::Vec1;
+use unicode_normalization::UnicodeNormalization;
 
 use super::media::{Media, MediaKind};
 
@@ -10,25 +11,28 @@ use super::media::{Media, MediaKind};
 /// judging strategy configured for the session. For example, a session may use
 /// exact matching, host judgment, or an LLM-based judge.
 ///
-/// Guaranteed to be 1 to 200 characters, not only whitespace, and free of NUL.
-/// Accepted text is preserved exactly.
+/// Guaranteed to be 1 to 200 characters in NFC, with no surrounding whitespace
+/// and no control characters.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct FreeInputAnswer(String);
 
 impl FreeInputAnswer {
     pub(crate) const MAX_LENGTH: usize = 200;
 
-    pub(crate) fn new(text: impl Into<String>) -> Result<Self, FreeInputAnswerError> {
-        let text = text.into();
-        if text.trim().is_empty() {
-            return Err(FreeInputAnswerError::Blank);
+    /// Parses text into a free input answer.
+    ///
+    /// Trims surrounding whitespace and normalizes the input text to NFC.
+    pub(crate) fn parse(text: impl Into<String>) -> Result<Self, FreeInputAnswerParseError> {
+        let text: String = text.into().trim().nfc().collect();
+        if text.is_empty() {
+            return Err(FreeInputAnswerParseError::Blank);
         }
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
-            return Err(FreeInputAnswerError::TooLong { length });
+            return Err(FreeInputAnswerParseError::TooLong { length });
         }
-        if text.contains('\0') {
-            return Err(FreeInputAnswerError::InvalidCharacter);
+        if text.chars().any(char::is_control) {
+            return Err(FreeInputAnswerParseError::InvalidCharacter);
         }
         Ok(Self(text))
     }
@@ -39,7 +43,7 @@ impl FreeInputAnswer {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum FreeInputAnswerError {
+pub(crate) enum FreeInputAnswerParseError {
     #[error("free input answer must not be empty or only whitespace")]
     Blank,
     #[error(
@@ -47,7 +51,7 @@ pub(crate) enum FreeInputAnswerError {
         FreeInputAnswer::MAX_LENGTH
     )]
     TooLong { length: usize },
-    #[error("free input answer must not contain NUL")]
+    #[error("free input answer must not contain control characters")]
     InvalidCharacter,
 }
 
@@ -101,25 +105,28 @@ pub(crate) enum ChoiceRequirement {
 
 /// An answer presented as text in a [`TextChoice`] response.
 ///
-/// Guaranteed to be 1 to 200 characters, not only whitespace, and free of NUL.
-/// Accepted text is preserved exactly.
+/// Guaranteed to be 1 to 200 characters in NFC, with no surrounding
+/// whitespace and no control characters.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct TextChoiceAnswer(String);
 
 impl TextChoiceAnswer {
     pub(crate) const MAX_LENGTH: usize = 200;
 
-    pub(crate) fn new(text: impl Into<String>) -> Result<Self, TextChoiceAnswerError> {
-        let text = text.into();
-        if text.trim().is_empty() {
-            return Err(TextChoiceAnswerError::Blank);
+    /// Parses text into a text choice answer.
+    ///
+    /// Trims surrounding whitespace and normalizes the input text to NFC.
+    pub(crate) fn parse(text: impl Into<String>) -> Result<Self, TextChoiceAnswerParseError> {
+        let text: String = text.into().trim().nfc().collect();
+        if text.is_empty() {
+            return Err(TextChoiceAnswerParseError::Blank);
         }
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
-            return Err(TextChoiceAnswerError::TooLong { length });
+            return Err(TextChoiceAnswerParseError::TooLong { length });
         }
-        if text.contains('\0') {
-            return Err(TextChoiceAnswerError::InvalidCharacter);
+        if text.chars().any(char::is_control) {
+            return Err(TextChoiceAnswerParseError::InvalidCharacter);
         }
         Ok(Self(text))
     }
@@ -130,7 +137,7 @@ impl TextChoiceAnswer {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum TextChoiceAnswerError {
+pub(crate) enum TextChoiceAnswerParseError {
     #[error("text choice answer must not be empty or only whitespace")]
     Blank,
     #[error(
@@ -138,7 +145,7 @@ pub(crate) enum TextChoiceAnswerError {
         TextChoiceAnswer::MAX_LENGTH
     )]
     TooLong { length: usize },
-    #[error("text choice answer must not contain NUL")]
+    #[error("text choice answer must not contain control characters")]
     InvalidCharacter,
 }
 
@@ -209,25 +216,28 @@ pub(crate) enum TextChoiceError {
 
 /// Text shown alongside the image of an [`ImageChoiceAnswer`].
 ///
-/// Guaranteed to be 1 to 200 characters, not only whitespace, and free of NUL.
-/// Accepted text is preserved exactly.
+/// Guaranteed to be 1 to 200 characters in NFC, with no surrounding whitespace
+/// and no control characters.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ImageCaption(String);
 
 impl ImageCaption {
     pub(crate) const MAX_LENGTH: usize = 200;
 
-    pub(crate) fn new(text: impl Into<String>) -> Result<Self, ImageCaptionError> {
-        let text = text.into();
-        if text.trim().is_empty() {
-            return Err(ImageCaptionError::Blank);
+    /// Parses text into an image caption.
+    ///
+    /// Trims surrounding whitespace and normalizes the input text to NFC.
+    pub(crate) fn parse(text: impl Into<String>) -> Result<Self, ImageCaptionParseError> {
+        let text: String = text.into().trim().nfc().collect();
+        if text.is_empty() {
+            return Err(ImageCaptionParseError::Blank);
         }
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
-            return Err(ImageCaptionError::TooLong { length });
+            return Err(ImageCaptionParseError::TooLong { length });
         }
-        if text.contains('\0') {
-            return Err(ImageCaptionError::InvalidCharacter);
+        if text.chars().any(char::is_control) {
+            return Err(ImageCaptionParseError::InvalidCharacter);
         }
         Ok(Self(text))
     }
@@ -238,7 +248,7 @@ impl ImageCaption {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum ImageCaptionError {
+pub(crate) enum ImageCaptionParseError {
     #[error("image caption must not be empty or only whitespace")]
     Blank,
     #[error(
@@ -246,7 +256,7 @@ pub(crate) enum ImageCaptionError {
         ImageCaption::MAX_LENGTH
     )]
     TooLong { length: usize },
-    #[error("image caption must not contain NUL")]
+    #[error("image caption must not contain control characters")]
     InvalidCharacter,
 }
 
@@ -562,24 +572,24 @@ mod tests {
 
     #[test]
     fn accepts_text_within_bounds() {
-        assert!(FreeInputAnswer::new("x".repeat(200)).is_ok());
-        assert!(TextChoiceAnswer::new("x".repeat(200)).is_ok());
-        assert!(ImageCaption::new("x".repeat(200)).is_ok());
+        assert!(FreeInputAnswer::parse("x".repeat(200)).is_ok());
+        assert!(TextChoiceAnswer::parse("x".repeat(200)).is_ok());
+        assert!(ImageCaption::parse("x".repeat(200)).is_ok());
     }
 
     #[test]
     fn rejects_text_over_the_limit() {
         assert_eq!(
-            FreeInputAnswer::new("x".repeat(201)),
-            Err(FreeInputAnswerError::TooLong { length: 201 })
+            FreeInputAnswer::parse("x".repeat(201)),
+            Err(FreeInputAnswerParseError::TooLong { length: 201 })
         );
         assert_eq!(
-            TextChoiceAnswer::new("x".repeat(201)),
-            Err(TextChoiceAnswerError::TooLong { length: 201 })
+            TextChoiceAnswer::parse("x".repeat(201)),
+            Err(TextChoiceAnswerParseError::TooLong { length: 201 })
         );
         assert_eq!(
-            ImageCaption::new("x".repeat(201)),
-            Err(ImageCaptionError::TooLong { length: 201 })
+            ImageCaption::parse("x".repeat(201)),
+            Err(ImageCaptionParseError::TooLong { length: 201 })
         );
     }
 
@@ -587,42 +597,82 @@ mod tests {
     fn rejects_blank_text() {
         for text in ["", " ", "\t\n", "\u{3000}"] {
             assert_eq!(
-                FreeInputAnswer::new(text),
-                Err(FreeInputAnswerError::Blank),
+                FreeInputAnswer::parse(text),
+                Err(FreeInputAnswerParseError::Blank),
                 "{text:?}"
             );
             assert_eq!(
-                TextChoiceAnswer::new(text),
-                Err(TextChoiceAnswerError::Blank),
+                TextChoiceAnswer::parse(text),
+                Err(TextChoiceAnswerParseError::Blank),
                 "{text:?}"
             );
             assert_eq!(
-                ImageCaption::new(text),
-                Err(ImageCaptionError::Blank),
+                ImageCaption::parse(text),
+                Err(ImageCaptionParseError::Blank),
                 "{text:?}"
             );
         }
     }
 
     #[test]
-    fn rejects_text_containing_nul() {
-        for text in ["\0", "a\0", "\0a", "a\0b"] {
+    fn rejects_control_characters() {
+        for text in ["\0", "a\0b", "a\rb", "a\nb", "a\tb", "a\u{7f}b", "a\u{85}b"] {
             assert_eq!(
-                FreeInputAnswer::new(text),
-                Err(FreeInputAnswerError::InvalidCharacter),
+                FreeInputAnswer::parse(text),
+                Err(FreeInputAnswerParseError::InvalidCharacter),
                 "{text:?}"
             );
             assert_eq!(
-                TextChoiceAnswer::new(text),
-                Err(TextChoiceAnswerError::InvalidCharacter),
+                TextChoiceAnswer::parse(text),
+                Err(TextChoiceAnswerParseError::InvalidCharacter),
                 "{text:?}"
             );
             assert_eq!(
-                ImageCaption::new(text),
-                Err(ImageCaptionError::InvalidCharacter),
+                ImageCaption::parse(text),
+                Err(ImageCaptionParseError::InvalidCharacter),
                 "{text:?}"
             );
         }
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        for text in [" Tokyo ", "\tTokyo\n", "\u{3000}Tokyo"] {
+            assert_eq!(
+                FreeInputAnswer::parse(text).unwrap().as_str(),
+                "Tokyo",
+                "{text:?}"
+            );
+            assert_eq!(
+                TextChoiceAnswer::parse(text).unwrap().as_str(),
+                "Tokyo",
+                "{text:?}"
+            );
+            assert_eq!(
+                ImageCaption::parse(text).unwrap().as_str(),
+                "Tokyo",
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn normalizes_to_nfc() {
+        assert_eq!(
+            FreeInputAnswer::parse("a\u{301}").unwrap().as_str(),
+            "\u{e1}"
+        );
+        assert_eq!(FreeInputAnswer::parse("か\u{3099}").unwrap().as_str(), "が");
+        assert_eq!(
+            TextChoiceAnswer::parse("a\u{301}").unwrap().as_str(),
+            "\u{e1}"
+        );
+        assert_eq!(
+            TextChoiceAnswer::parse("か\u{3099}").unwrap().as_str(),
+            "が"
+        );
+        assert_eq!(ImageCaption::parse("a\u{301}").unwrap().as_str(), "\u{e1}");
+        assert_eq!(ImageCaption::parse("か\u{3099}").unwrap().as_str(), "が");
     }
 
     #[test]
@@ -666,7 +716,7 @@ mod tests {
         let free_input = |count: usize| {
             FreeInput::new(
                 (0..count)
-                    .map(|index| FreeInputAnswer::new(format!("answer{index}")).unwrap())
+                    .map(|index| FreeInputAnswer::parse(format!("answer{index}")).unwrap())
                     .collect(),
             )
         };
@@ -713,7 +763,7 @@ mod tests {
 
     #[test]
     fn rejects_answer_both_correct_and_wrong() {
-        let tokyo = TextChoiceAnswer::new("Tokyo").unwrap();
+        let tokyo = TextChoiceAnswer::parse("Tokyo").unwrap();
 
         assert_eq!(
             TextChoice::new(
@@ -730,7 +780,7 @@ mod tests {
         assert!(
             TextChoice::new(
                 ChoiceRequirement::All,
-                BTreeSet::from([TextChoiceAnswer::new("Tokyo").unwrap()]),
+                BTreeSet::from([TextChoiceAnswer::parse("Tokyo").unwrap()]),
                 BTreeSet::new(),
             )
             .is_ok()
@@ -742,9 +792,9 @@ mod tests {
         let text_choice = |wrong_count: usize| {
             TextChoice::new(
                 ChoiceRequirement::One,
-                BTreeSet::from([TextChoiceAnswer::new("correct").unwrap()]),
+                BTreeSet::from([TextChoiceAnswer::parse("correct").unwrap()]),
                 (0..wrong_count)
-                    .map(|index| TextChoiceAnswer::new(format!("wrong{index}")).unwrap())
+                    .map(|index| TextChoiceAnswer::parse(format!("wrong{index}")).unwrap())
                     .collect(),
             )
         };
@@ -797,7 +847,7 @@ mod tests {
         let image = media(MediaKind::Image);
         let plain = ImageChoiceAnswer::new(image, None).unwrap();
         let labelled =
-            ImageChoiceAnswer::new(image, Some(ImageCaption::new("Tokyo").unwrap())).unwrap();
+            ImageChoiceAnswer::new(image, Some(ImageCaption::parse("Tokyo").unwrap())).unwrap();
 
         assert_eq!(
             ImageChoice::new(
@@ -820,7 +870,7 @@ mod tests {
     #[test]
     fn validates_a_complete_response_mode() {
         let free_input =
-            FreeInput::new(BTreeSet::from([FreeInputAnswer::new("Tokyo").unwrap()])).unwrap();
+            FreeInput::new(BTreeSet::from([FreeInputAnswer::parse("Tokyo").unwrap()])).unwrap();
 
         assert_eq!(ResponseMode::FreeInput(free_input).validate(), Ok(()));
     }
@@ -840,7 +890,7 @@ mod tests {
         let text_choice = TextChoice::new(
             ChoiceRequirement::One,
             BTreeSet::new(),
-            BTreeSet::from([TextChoiceAnswer::new("Kyoto").unwrap()]),
+            BTreeSet::from([TextChoiceAnswer::parse("Kyoto").unwrap()]),
         )
         .unwrap();
         let image_choice =

@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
 use super::{quiz::QuizId, tag::Tag, user::UserId};
@@ -25,25 +26,28 @@ impl QuizListId {
 
 /// The title of a quiz list.
 ///
-/// Guaranteed to be 1 to 100 characters, not only whitespace, and free of NUL.
-/// Accepted text is preserved exactly.
+/// Guaranteed to be 1 to 100 characters in NFC, with no surrounding whitespace
+/// and no control characters.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct QuizListTitle(String);
 
 impl QuizListTitle {
     pub(crate) const MAX_LENGTH: usize = 100;
 
-    pub(crate) fn new(text: impl Into<String>) -> Result<Self, QuizListTitleError> {
-        let text = text.into();
-        if text.trim().is_empty() {
-            return Err(QuizListTitleError::Blank);
+    /// Parses text into a quiz list title.
+    ///
+    /// Trims surrounding whitespace and normalizes the input text to NFC.
+    pub(crate) fn parse(text: impl Into<String>) -> Result<Self, QuizListTitleParseError> {
+        let text: String = text.into().trim().nfc().collect();
+        if text.is_empty() {
+            return Err(QuizListTitleParseError::Blank);
         }
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
-            return Err(QuizListTitleError::TooLong { length });
+            return Err(QuizListTitleParseError::TooLong { length });
         }
-        if text.contains('\0') {
-            return Err(QuizListTitleError::InvalidCharacter);
+        if text.chars().any(char::is_control) {
+            return Err(QuizListTitleParseError::InvalidCharacter);
         }
         Ok(Self(text))
     }
@@ -54,7 +58,7 @@ impl QuizListTitle {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum QuizListTitleError {
+pub(crate) enum QuizListTitleParseError {
     #[error("quiz list title must not be empty or only whitespace")]
     Blank,
     #[error(
@@ -62,31 +66,37 @@ pub(crate) enum QuizListTitleError {
         QuizListTitle::MAX_LENGTH
     )]
     TooLong { length: usize },
-    #[error("quiz list title must not contain NUL")]
+    #[error("quiz list title must not contain control characters")]
     InvalidCharacter,
 }
 
 /// A description of what a quiz list contains.
 ///
-/// Guaranteed to be 1 to 1000 characters, not only whitespace, and free of NUL.
-/// Accepted text is preserved exactly.
+/// Guaranteed to be 1 to 1000 characters in NFC, not only whitespace, with no
+/// control characters other than newline and tab.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct QuizListDescription(String);
 
 impl QuizListDescription {
     pub(crate) const MAX_LENGTH: usize = 1000;
 
-    pub(crate) fn new(text: impl Into<String>) -> Result<Self, QuizListDescriptionError> {
-        let text = text.into();
+    /// Parses text into a quiz list description.
+    ///
+    /// Normalizes the input text to NFC.
+    pub(crate) fn parse(text: impl Into<String>) -> Result<Self, QuizListDescriptionParseError> {
+        let text: String = text.into().nfc().collect();
         if text.trim().is_empty() {
-            return Err(QuizListDescriptionError::Blank);
+            return Err(QuizListDescriptionParseError::Blank);
         }
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
-            return Err(QuizListDescriptionError::TooLong { length });
+            return Err(QuizListDescriptionParseError::TooLong { length });
         }
-        if text.contains('\0') {
-            return Err(QuizListDescriptionError::InvalidCharacter);
+        if text
+            .chars()
+            .any(|character| character.is_control() && character != '\n' && character != '\t')
+        {
+            return Err(QuizListDescriptionParseError::InvalidCharacter);
         }
         Ok(Self(text))
     }
@@ -97,7 +107,7 @@ impl QuizListDescription {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum QuizListDescriptionError {
+pub(crate) enum QuizListDescriptionParseError {
     #[error("quiz list description must not be empty or only whitespace")]
     Blank,
     #[error(
@@ -105,7 +115,7 @@ pub(crate) enum QuizListDescriptionError {
         QuizListDescription::MAX_LENGTH
     )]
     TooLong { length: usize },
-    #[error("quiz list description must not contain NUL")]
+    #[error("quiz list description must not contain control characters other than newline and tab")]
     InvalidCharacter,
 }
 
@@ -500,7 +510,7 @@ mod tests {
 
     fn tags(count: usize) -> BTreeSet<Tag> {
         (0..count)
-            .map(|index| Tag::new(format!("tag{index}")).unwrap())
+            .map(|index| Tag::parse(format!("tag{index}")).unwrap())
             .collect()
     }
 
@@ -510,7 +520,7 @@ mod tests {
     ) -> Result<QuizList, QuizListError> {
         QuizList::new(
             UserId::from_uuid(Uuid::now_v7()),
-            QuizListTitle::new("Capitals").unwrap(),
+            QuizListTitle::parse("Capitals").unwrap(),
             None,
             Visibility::Private,
             quiz_ids,
@@ -520,19 +530,19 @@ mod tests {
 
     #[test]
     fn accepts_text_within_bounds() {
-        assert!(QuizListTitle::new("x".repeat(100)).is_ok());
-        assert!(QuizListDescription::new("x".repeat(1000)).is_ok());
+        assert!(QuizListTitle::parse("x".repeat(100)).is_ok());
+        assert!(QuizListDescription::parse("x".repeat(1000)).is_ok());
     }
 
     #[test]
     fn rejects_text_over_the_limit() {
         assert_eq!(
-            QuizListTitle::new("x".repeat(101)),
-            Err(QuizListTitleError::TooLong { length: 101 })
+            QuizListTitle::parse("x".repeat(101)),
+            Err(QuizListTitleParseError::TooLong { length: 101 })
         );
         assert_eq!(
-            QuizListDescription::new("x".repeat(1001)),
-            Err(QuizListDescriptionError::TooLong { length: 1001 })
+            QuizListDescription::parse("x".repeat(1001)),
+            Err(QuizListDescriptionParseError::TooLong { length: 1001 })
         );
     }
 
@@ -540,32 +550,65 @@ mod tests {
     fn rejects_blank_text() {
         for text in ["", " ", "\t\n", "\u{3000}"] {
             assert_eq!(
-                QuizListTitle::new(text),
-                Err(QuizListTitleError::Blank),
+                QuizListTitle::parse(text),
+                Err(QuizListTitleParseError::Blank),
                 "{text:?}"
             );
             assert_eq!(
-                QuizListDescription::new(text),
-                Err(QuizListDescriptionError::Blank),
+                QuizListDescription::parse(text),
+                Err(QuizListDescriptionParseError::Blank),
                 "{text:?}"
             );
         }
     }
 
     #[test]
-    fn rejects_text_containing_nul() {
-        for text in ["\0", "a\0", "\0a", "a\0b"] {
+    fn rejects_control_characters() {
+        for text in ["\0", "a\0b", "a\rb", "a\nb", "a\tb", "a\u{7f}b", "a\u{85}b"] {
             assert_eq!(
-                QuizListTitle::new(text),
-                Err(QuizListTitleError::InvalidCharacter),
-                "{text:?}"
-            );
-            assert_eq!(
-                QuizListDescription::new(text),
-                Err(QuizListDescriptionError::InvalidCharacter),
+                QuizListTitle::parse(text),
+                Err(QuizListTitleParseError::InvalidCharacter),
                 "{text:?}"
             );
         }
+        for text in ["\0", "a\0b", "a\rb", "a\u{7f}b", "a\u{85}b"] {
+            assert_eq!(
+                QuizListDescription::parse(text),
+                Err(QuizListDescriptionParseError::InvalidCharacter),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_newlines_tabs_and_surrounding_whitespace_in_multi_line_text() {
+        let text = "  first line\n\tsecond line\n";
+        assert_eq!(QuizListDescription::parse(text).unwrap().as_str(), text);
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        for text in [" Tokyo ", "\tTokyo\n", "\u{3000}Tokyo"] {
+            assert_eq!(
+                QuizListTitle::parse(text).unwrap().as_str(),
+                "Tokyo",
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn normalizes_to_nfc() {
+        assert_eq!(QuizListTitle::parse("a\u{301}").unwrap().as_str(), "\u{e1}");
+        assert_eq!(QuizListTitle::parse("か\u{3099}").unwrap().as_str(), "が");
+        assert_eq!(
+            QuizListDescription::parse("a\u{301}").unwrap().as_str(),
+            "\u{e1}"
+        );
+        assert_eq!(
+            QuizListDescription::parse("か\u{3099}").unwrap().as_str(),
+            "が"
+        );
     }
 
     #[test]
@@ -621,7 +664,7 @@ mod tests {
             QuizList::reconstitute(
                 QuizListId::new(),
                 UserId::from_uuid(Uuid::now_v7()),
-                QuizListTitle::new("Capitals").unwrap(),
+                QuizListTitle::parse("Capitals").unwrap(),
                 None,
                 Visibility::Private,
                 entries(Vec::new()).unwrap(),

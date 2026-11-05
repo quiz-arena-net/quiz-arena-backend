@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use isolang::Language;
 use mitsein::vec1::Vec1;
+use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
 use super::{
@@ -31,22 +32,29 @@ impl QuizId {
 }
 /// The question text presented to players.
 ///
-/// Guaranteed to be at most 1000 characters and free of NUL. May be blank,
-/// which only a draft is allowed to be. Accepted text is preserved exactly.
+/// Guaranteed to be at most 1000 characters in NFC, with no control characters
+/// other than newline and tab. May be blank, which only a draft is allowed to
+/// be.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct PromptText(String);
 
 impl PromptText {
     pub(crate) const MAX_LENGTH: usize = 1000;
 
-    pub(crate) fn new(text: impl Into<String>) -> Result<Self, PromptTextError> {
-        let text = text.into();
+    /// Parses text into prompt text.
+    ///
+    /// Normalizes the input text to NFC.
+    pub(crate) fn parse(text: impl Into<String>) -> Result<Self, PromptTextParseError> {
+        let text: String = text.into().nfc().collect();
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
-            return Err(PromptTextError::TooLong { length });
+            return Err(PromptTextParseError::TooLong { length });
         }
-        if text.contains('\0') {
-            return Err(PromptTextError::InvalidCharacter);
+        if text
+            .chars()
+            .any(|character| character.is_control() && character != '\n' && character != '\t')
+        {
+            return Err(PromptTextParseError::InvalidCharacter);
         }
         Ok(Self(text))
     }
@@ -62,13 +70,13 @@ impl PromptText {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum PromptTextError {
+pub(crate) enum PromptTextParseError {
     #[error(
         "prompt text must be at most {} characters, got {length}",
         PromptText::MAX_LENGTH
     )]
     TooLong { length: usize },
-    #[error("prompt text must not contain NUL")]
+    #[error("prompt text must not contain control characters other than newline and tab")]
     InvalidCharacter,
 }
 
@@ -101,22 +109,26 @@ impl Prompt {
 /// This is intended for presentation and does not necessarily correspond
 /// exactly to the representation accepted by a particular [`ResponseMode`].
 ///
-/// Guaranteed to be at most 200 characters and free of NUL. May be blank, which
-/// only a draft is allowed to be. Accepted text is preserved exactly.
+/// Guaranteed to be at most 200 characters in NFC, with no surrounding
+/// whitespace and no control characters. May be blank, which only a draft is
+/// allowed to be.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct CanonicalAnswer(String);
 
 impl CanonicalAnswer {
     pub(crate) const MAX_LENGTH: usize = 200;
 
-    pub(crate) fn new(text: impl Into<String>) -> Result<Self, CanonicalAnswerError> {
-        let text = text.into();
+    /// Parses text into a canonical answer.
+    ///
+    /// Trims surrounding whitespace and normalizes the input text to NFC.
+    pub(crate) fn parse(text: impl Into<String>) -> Result<Self, CanonicalAnswerParseError> {
+        let text: String = text.into().trim().nfc().collect();
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
-            return Err(CanonicalAnswerError::TooLong { length });
+            return Err(CanonicalAnswerParseError::TooLong { length });
         }
-        if text.contains('\0') {
-            return Err(CanonicalAnswerError::InvalidCharacter);
+        if text.chars().any(char::is_control) {
+            return Err(CanonicalAnswerParseError::InvalidCharacter);
         }
         Ok(Self(text))
     }
@@ -132,13 +144,13 @@ impl CanonicalAnswer {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum CanonicalAnswerError {
+pub(crate) enum CanonicalAnswerParseError {
     #[error(
         "canonical answer must be at most {} characters, got {length}",
         CanonicalAnswer::MAX_LENGTH
     )]
     TooLong { length: usize },
-    #[error("canonical answer must not contain NUL")]
+    #[error("canonical answer must not contain control characters")]
     InvalidCharacter,
 }
 
@@ -641,13 +653,13 @@ mod tests {
 
     fn free_input() -> ResponseMode {
         ResponseMode::FreeInput(
-            FreeInput::new(BTreeSet::from([FreeInputAnswer::new("Tokyo").unwrap()])).unwrap(),
+            FreeInput::new(BTreeSet::from([FreeInputAnswer::parse("Tokyo").unwrap()])).unwrap(),
         )
     }
 
     fn tags(count: usize) -> BTreeSet<Tag> {
         (0..count)
-            .map(|index| Tag::new(format!("tag{index}")).unwrap())
+            .map(|index| Tag::parse(format!("tag{index}")).unwrap())
             .collect()
     }
 
@@ -658,8 +670,8 @@ mod tests {
         tags: BTreeSet<Tag>,
     ) -> Result<QuizContent, QuizContentError> {
         QuizContent::new(
-            Prompt::new(PromptText::new(prompt_text).unwrap(), None),
-            CanonicalAnswer::new(canonical_answer).unwrap(),
+            Prompt::new(PromptText::parse(prompt_text).unwrap(), None),
+            CanonicalAnswer::parse(canonical_answer).unwrap(),
             response_mode,
             Language::Eng,
             tags,
@@ -680,69 +692,92 @@ mod tests {
 
     #[test]
     fn accepts_text_within_bounds() {
-        assert!(PromptText::new("x".repeat(1000)).is_ok());
-        assert!(CanonicalAnswer::new("x".repeat(200)).is_ok());
+        assert!(PromptText::parse("x".repeat(1000)).is_ok());
+        assert!(CanonicalAnswer::parse("x".repeat(200)).is_ok());
     }
 
     #[test]
     fn accepts_blank_text() {
         for text in ["", " ", "\t\n", "\u{3000}"] {
-            assert!(PromptText::new(text).unwrap().is_blank(), "{text:?}");
-            assert!(CanonicalAnswer::new(text).unwrap().is_blank(), "{text:?}");
+            assert!(PromptText::parse(text).unwrap().is_blank(), "{text:?}");
+            assert!(CanonicalAnswer::parse(text).unwrap().is_blank(), "{text:?}");
         }
-        assert!(!PromptText::new(" x ").unwrap().is_blank());
+        assert!(!PromptText::parse(" x ").unwrap().is_blank());
     }
 
     #[test]
     fn rejects_blank_text_over_the_limit() {
         assert_eq!(
-            PromptText::new(" ".repeat(1001)),
-            Err(PromptTextError::TooLong { length: 1001 })
+            PromptText::parse(" ".repeat(1001)),
+            Err(PromptTextParseError::TooLong { length: 1001 })
         );
     }
 
     #[test]
     fn rejects_text_over_the_limit() {
         assert_eq!(
-            PromptText::new("x".repeat(1001)),
-            Err(PromptTextError::TooLong { length: 1001 })
+            PromptText::parse("x".repeat(1001)),
+            Err(PromptTextParseError::TooLong { length: 1001 })
         );
         assert_eq!(
-            CanonicalAnswer::new("x".repeat(201)),
-            Err(CanonicalAnswerError::TooLong { length: 201 })
+            CanonicalAnswer::parse("x".repeat(201)),
+            Err(CanonicalAnswerParseError::TooLong { length: 201 })
         );
     }
 
     #[test]
     fn counts_length_in_characters_not_bytes() {
-        assert!(PromptText::new("あ".repeat(1000)).is_ok());
+        assert!(PromptText::parse("あ".repeat(1000)).is_ok());
         assert_eq!(
-            PromptText::new("あ".repeat(1001)),
-            Err(PromptTextError::TooLong { length: 1001 })
+            PromptText::parse("あ".repeat(1001)),
+            Err(PromptTextParseError::TooLong { length: 1001 })
         );
     }
 
     #[test]
-    fn rejects_text_containing_nul() {
-        for text in ["\0", "a\0", "\0a", "a\0b"] {
+    fn rejects_control_characters() {
+        for text in ["\0", "a\0b", "a\rb", "a\nb", "a\tb", "a\u{7f}b", "a\u{85}b"] {
             assert_eq!(
-                PromptText::new(text),
-                Err(PromptTextError::InvalidCharacter),
+                CanonicalAnswer::parse(text),
+                Err(CanonicalAnswerParseError::InvalidCharacter),
                 "{text:?}"
             );
+        }
+        for text in ["\0", "a\0b", "a\rb", "a\u{7f}b", "a\u{85}b"] {
             assert_eq!(
-                CanonicalAnswer::new(text),
-                Err(CanonicalAnswerError::InvalidCharacter),
+                PromptText::parse(text),
+                Err(PromptTextParseError::InvalidCharacter),
                 "{text:?}"
             );
         }
     }
 
     #[test]
-    fn preserves_accepted_text_exactly() {
-        for text in [" padded ", "Tokyo", "東京", "a\u{301}"] {
-            assert_eq!(PromptText::new(text).unwrap().as_str(), text);
+    fn keeps_newlines_tabs_and_surrounding_whitespace_in_multi_line_text() {
+        let text = "  first line\n\tsecond line\n";
+        assert_eq!(PromptText::parse(text).unwrap().as_str(), text);
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        for text in [" Tokyo ", "\tTokyo\n", "\u{3000}Tokyo"] {
+            assert_eq!(
+                CanonicalAnswer::parse(text).unwrap().as_str(),
+                "Tokyo",
+                "{text:?}"
+            );
         }
+    }
+
+    #[test]
+    fn normalizes_to_nfc() {
+        assert_eq!(
+            CanonicalAnswer::parse("a\u{301}").unwrap().as_str(),
+            "\u{e1}"
+        );
+        assert_eq!(CanonicalAnswer::parse("か\u{3099}").unwrap().as_str(), "が");
+        assert_eq!(PromptText::parse("a\u{301}").unwrap().as_str(), "\u{e1}");
+        assert_eq!(PromptText::parse("か\u{3099}").unwrap().as_str(), "が");
     }
 
     #[test]
@@ -795,9 +830,9 @@ mod tests {
         tags: BTreeSet<Tag>,
     ) -> DraftQuizContent {
         DraftQuizContent::new(
-            PromptText::new(prompt_text).unwrap(),
+            PromptText::parse(prompt_text).unwrap(),
             None,
-            CanonicalAnswer::new(canonical_answer).unwrap(),
+            CanonicalAnswer::parse(canonical_answer).unwrap(),
             response_mode,
             Language::Eng,
             tags,
