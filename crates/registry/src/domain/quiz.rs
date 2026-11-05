@@ -376,11 +376,11 @@ impl QuizContent {
         })
     }
 
-    /// Rehydrates a version of the content from persisted state.
+    /// Reconstitutes a version of the content from stored state.
     ///
     /// For repository implementations only. Checks the invariants, which hold
     /// for every version however it was obtained.
-    pub(crate) fn from_persistence(
+    pub(crate) fn reconstitute(
         id: QuizContentId,
         prompt: Prompt,
         canonical_answer: CanonicalAnswer,
@@ -517,11 +517,11 @@ impl Quiz {
         }
     }
 
-    /// Rehydrates a quiz from persisted state.
+    /// Reconstitutes a quiz from stored state.
     ///
     /// For repository implementations only. The aggregate invariants are
     /// carried by [`QuizContent`] and [`QuizState`], so this cannot fail.
-    pub(crate) fn from_persistence(
+    pub(crate) fn reconstitute(
         id: QuizId,
         author: UserId,
         inclusion_policy: InclusionPolicy,

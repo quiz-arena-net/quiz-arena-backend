@@ -172,11 +172,11 @@ impl QuizListEntries {
         })
     }
 
-    /// Rehydrates a version of the entries from persisted state.
+    /// Reconstitutes a version of the entries from stored state.
     ///
     /// For repository implementations only. Checks the invariants, which hold
     /// for every version however it was obtained.
-    pub(crate) fn from_persistence(
+    pub(crate) fn reconstitute(
         id: QuizListEntriesId,
         quiz_ids: Vec<QuizId>,
     ) -> Result<Self, QuizListEntriesError> {
@@ -298,12 +298,12 @@ impl QuizList {
         })
     }
 
-    /// Rehydrates a quiz list from persisted state.
+    /// Reconstitutes a quiz list from stored state.
     ///
     /// For repository implementations only. Checks the aggregate invariants,
     /// which hold for every quiz list however it was obtained. Restrictions
     /// that apply only when creating a quiz list are not rechecked here.
-    pub(crate) fn from_persistence(
+    pub(crate) fn reconstitute(
         id: QuizListId,
         owner: UserId,
         title: QuizListTitle,
@@ -616,9 +616,9 @@ mod tests {
     }
 
     #[test]
-    fn rehydration_checks_invariants() {
-        let rehydrate = |tags| {
-            QuizList::from_persistence(
+    fn reconstitution_checks_invariants() {
+        let reconstitute = |tags| {
+            QuizList::reconstitute(
                 QuizListId::new(),
                 UserId::from_uuid(Uuid::now_v7()),
                 QuizListTitle::new("Capitals").unwrap(),
@@ -629,9 +629,9 @@ mod tests {
             )
         };
 
-        assert!(rehydrate(tags(10)).is_ok());
+        assert!(reconstitute(tags(10)).is_ok());
         assert_eq!(
-            rehydrate(tags(11)),
+            reconstitute(tags(11)),
             Err(QuizListError::TooManyTags { count: 11 })
         );
     }
