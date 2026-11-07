@@ -249,7 +249,9 @@ impl QuizContentId {
 /// The invariants are carried by the field types. Session-specific behavior,
 /// such as how free-input responses are judged, is configured outside the
 /// aggregate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Two versions are equal when they have the same identifier.
+#[derive(Debug, Clone, Eq)]
 pub(crate) struct QuizContent {
     /// Identifies this version.
     id: QuizContentId,
@@ -333,6 +335,12 @@ impl QuizContent {
 
     pub(crate) fn tags(&self) -> &TagSet {
         &self.tags
+    }
+}
+
+impl PartialEq for QuizContent {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
     }
 }
 
@@ -452,8 +460,9 @@ pub(crate) enum QuizState {
 /// version. Statistics use the quiz ID regardless of version. The inclusion
 /// policy and the draft are not versioned.
 ///
-/// Whether a user may edit a quiz is answered by [`Quiz::editable_by`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Whether a user may edit a quiz is answered by [`Quiz::editable_by`]. Two
+/// quizzes are equal when they have the same identifier.
+#[derive(Debug, Clone, Eq)]
 pub(crate) struct Quiz {
     /// The unique identifier of this quiz.
     id: QuizId,
@@ -584,6 +593,12 @@ impl Quiz {
     /// are no longer permitted are skipped when a session builds its lineup.
     pub(crate) fn change_inclusion_policy(&mut self, inclusion_policy: InclusionPolicy) {
         self.inclusion_policy = inclusion_policy;
+    }
+}
+
+impl PartialEq for Quiz {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
     }
 }
 
@@ -770,6 +785,15 @@ mod tests {
     }
 
     #[test]
+    fn content_versions_are_equal_by_identifier() {
+        let first = QuizContent::try_from(complete_draft()).unwrap();
+        let second = QuizContent::try_from(complete_draft()).unwrap();
+
+        assert_eq!(first, first.clone());
+        assert_ne!(first, second);
+    }
+
+    #[test]
     fn converts_a_complete_draft() {
         let content = QuizContent::try_from(complete_draft()).unwrap();
 
@@ -815,6 +839,17 @@ mod tests {
                 )
             ))
         );
+    }
+
+    #[test]
+    fn quizzes_are_equal_by_identifier() {
+        let author = user();
+        let quiz = unpublished_quiz(author);
+        let mut edited = quiz.clone();
+        edited.edit_draft(new_draft(Some("Q"), Some("A"), None, tags(0)));
+
+        assert_eq!(quiz, edited);
+        assert_ne!(quiz, unpublished_quiz(author));
     }
 
     #[test]
@@ -894,7 +929,7 @@ mod tests {
                 QuizContentFromDraftError::NoPromptText
             )))
         );
-        assert_eq!(quiz, before);
+        assert_eq!(quiz.state(), before.state());
     }
 
     #[test]
@@ -944,6 +979,6 @@ mod tests {
         let before = quiz.clone();
 
         assert_eq!(quiz.discard_draft(), Err(DiscardDraftError::Unpublished));
-        assert_eq!(quiz, before);
+        assert_eq!(quiz.state(), before.state());
     }
 }

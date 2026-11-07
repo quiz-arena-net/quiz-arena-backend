@@ -145,8 +145,9 @@ impl QuizListEntriesId {
 /// One version of the quizzes in a quiz list, in order.
 ///
 /// Guaranteed to hold at most 100 quizzes with no quiz twice. May be empty and
-/// may refer to quizzes that no longer exist.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// may refer to quizzes that no longer exist. Two versions are equal when they
+/// have the same identifier.
+#[derive(Debug, Clone, Eq)]
 pub(crate) struct QuizListEntries {
     /// Identifies this version.
     id: QuizListEntriesId,
@@ -203,6 +204,12 @@ impl QuizListEntries {
     }
 }
 
+impl PartialEq for QuizListEntries {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum QuizListEntriesError {
     #[error("a quiz list must not contain the same quiz twice")]
@@ -244,8 +251,9 @@ pub(crate) enum Visibility {
 ///
 /// The entries are versioned, see [`QuizListEntries`]. The title, description,
 /// visibility and tags are not. Edit permissions are checked by
-/// [`QuizList::editable_by`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// [`QuizList::editable_by`]. Two lists are equal when they have the same
+/// identifier.
+#[derive(Debug, Clone, Eq)]
 pub(crate) struct QuizList {
     /// The unique identifier of this list.
     id: QuizListId,
@@ -424,6 +432,12 @@ impl QuizList {
 
     pub(crate) fn change_tags(&mut self, tags: TagSet) {
         self.tags = tags;
+    }
+}
+
+impl PartialEq for QuizList {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
     }
 }
 
@@ -612,6 +626,26 @@ mod tests {
     }
 
     #[test]
+    fn entries_versions_are_equal_by_identifier() {
+        let ids = quiz_ids(2);
+        let first = entries(ids.clone()).unwrap();
+        let second = entries(ids).unwrap();
+
+        assert_eq!(first, first.clone());
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn quiz_lists_are_equal_by_identifier() {
+        let quiz_list = new_quiz_list(Vec::new(), tags(0)).unwrap();
+        let mut edited = quiz_list.clone();
+        edited.change_title(QuizListTitle::parse("Renamed").unwrap());
+
+        assert_eq!(quiz_list, edited);
+        assert_ne!(quiz_list, new_quiz_list(Vec::new(), tags(0)).unwrap());
+    }
+
+    #[test]
     fn only_the_owner_may_edit() {
         let quiz_list = new_quiz_list(Vec::new(), tags(0)).unwrap();
 
@@ -672,7 +706,7 @@ mod tests {
             quiz_list.add_quiz(QuizId::new(), Some(3)),
             Err(AddQuizError::PositionOutOfRange { position: 3 })
         );
-        assert_eq!(quiz_list, before);
+        assert_eq!(quiz_list.entries().id(), before.entries().id());
     }
 
     #[test]
@@ -685,7 +719,7 @@ mod tests {
             quiz_list.add_quiz(ids[0], None),
             Err(AddQuizError::DuplicateQuiz)
         );
-        assert_eq!(quiz_list, before);
+        assert_eq!(quiz_list.entries().id(), before.entries().id());
     }
 
     #[test]
@@ -697,7 +731,7 @@ mod tests {
             quiz_list.add_quiz(QuizId::new(), None),
             Err(AddQuizError::TooManyQuizzes { count: 101 })
         );
-        assert_eq!(quiz_list, before);
+        assert_eq!(quiz_list.entries().id(), before.entries().id());
     }
 
     #[test]
@@ -721,7 +755,7 @@ mod tests {
             quiz_list.remove_quiz(QuizId::new()),
             Err(RemoveQuizError::QuizNotFound)
         );
-        assert_eq!(quiz_list, before);
+        assert_eq!(quiz_list.entries().id(), before.entries().id());
     }
 
     #[test]
@@ -750,6 +784,6 @@ mod tests {
         ] {
             assert_eq!(quiz_list.reorder(order), Err(ReorderError::NotAPermutation));
         }
-        assert_eq!(quiz_list, before);
+        assert_eq!(quiz_list.entries().id(), before.entries().id());
     }
 }
