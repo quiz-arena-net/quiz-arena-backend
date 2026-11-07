@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
-use super::{quiz::QuizId, tag::Tag, user::UserId};
+use super::{quiz::QuizId, tag::TagSet, user::UserId};
 
 /// Uniquely identifies a quiz list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -243,8 +243,8 @@ pub(crate) enum Visibility {
 /// permitted stays in the list and is skipped.
 ///
 /// The entries are versioned, see [`QuizListEntries`]. The title, description,
-/// visibility and tags are not. A list can carry up to 10 tags. Edit
-/// permissions are checked by [`QuizList::editable_by`].
+/// visibility and tags are not. Edit permissions are checked by
+/// [`QuizList::editable_by`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuizList {
     /// The unique identifier of this list.
@@ -266,20 +266,10 @@ pub(crate) struct QuizList {
     entries: QuizListEntries,
 
     /// Tags associated with this list.
-    tags: BTreeSet<Tag>,
+    tags: TagSet,
 }
 
 impl QuizList {
-    pub(crate) const MAX_TAGS: usize = 10;
-
-    fn check_tags(tags: &BTreeSet<Tag>) -> Result<(), QuizListError> {
-        let count = tags.len();
-        if count > Self::MAX_TAGS {
-            return Err(QuizListError::TooManyTags { count });
-        }
-        Ok(())
-    }
-
     /// Creates a new quiz list with a freshly generated identifier and the
     /// first version of its entries.
     pub(crate) fn new(
@@ -288,7 +278,7 @@ impl QuizList {
         description: Option<QuizListDescription>,
         visibility: Visibility,
         quiz_ids: Vec<QuizId>,
-        tags: BTreeSet<Tag>,
+        tags: TagSet,
     ) -> Result<Self, QuizListError> {
         let entries = QuizListEntries::new(quiz_ids).map_err(|error| match error {
             QuizListEntriesError::DuplicateQuiz => QuizListError::DuplicateQuiz,
@@ -296,7 +286,6 @@ impl QuizList {
                 QuizListError::TooManyQuizzes { count }
             }
         })?;
-        Self::check_tags(&tags)?;
         Ok(Self {
             id: QuizListId::new(),
             owner,
@@ -310,9 +299,8 @@ impl QuizList {
 
     /// Reconstitutes a quiz list from stored state.
     ///
-    /// For repository implementations only. Checks the aggregate invariants,
-    /// which hold for every quiz list however it was obtained. Restrictions
-    /// that apply only when creating a quiz list are not rechecked here.
+    /// For repository implementations only. The aggregate invariants are
+    /// carried by the field types, so this cannot fail.
     pub(crate) fn reconstitute(
         id: QuizListId,
         owner: UserId,
@@ -320,10 +308,9 @@ impl QuizList {
         description: Option<QuizListDescription>,
         visibility: Visibility,
         entries: QuizListEntries,
-        tags: BTreeSet<Tag>,
-    ) -> Result<Self, QuizListError> {
-        Self::check_tags(&tags)?;
-        Ok(Self {
+        tags: TagSet,
+    ) -> Self {
+        Self {
             id,
             owner,
             title,
@@ -331,7 +318,7 @@ impl QuizList {
             visibility,
             entries,
             tags,
-        })
+        }
     }
 
     pub(crate) fn id(&self) -> QuizListId {
@@ -358,7 +345,7 @@ impl QuizList {
         &self.entries
     }
 
-    pub(crate) fn tags(&self) -> &BTreeSet<Tag> {
+    pub(crate) fn tags(&self) -> &TagSet {
         &self.tags
     }
 
@@ -435,14 +422,8 @@ impl QuizList {
         Ok(())
     }
 
-    /// Replaces the tags.
-    pub(crate) fn change_tags(&mut self, tags: BTreeSet<Tag>) -> Result<(), ChangeTagsError> {
-        let count = tags.len();
-        if count > Self::MAX_TAGS {
-            return Err(ChangeTagsError::TooManyTags { count });
-        }
+    pub(crate) fn change_tags(&mut self, tags: TagSet) {
         self.tags = tags;
-        Ok(())
     }
 }
 
@@ -455,11 +436,6 @@ pub(crate) enum QuizListError {
         QuizListEntries::MAX_QUIZZES
     )]
     TooManyQuizzes { count: usize },
-    #[error(
-        "a quiz list must have at most {} tags, got {count}",
-        QuizList::MAX_TAGS
-    )]
-    TooManyTags { count: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -487,18 +463,10 @@ pub(crate) enum ReorderError {
     NotAPermutation,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum ChangeTagsError {
-    #[error(
-        "a quiz list must have at most {} tags, got {count}",
-        QuizList::MAX_TAGS
-    )]
-    TooManyTags { count: usize },
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::tag::Tag;
 
     fn quiz_ids(count: usize) -> Vec<QuizId> {
         (0..count).map(|_| QuizId::new()).collect()
@@ -508,16 +476,16 @@ mod tests {
         QuizListEntries::new(quiz_ids)
     }
 
-    fn tags(count: usize) -> BTreeSet<Tag> {
-        (0..count)
-            .map(|index| Tag::parse(format!("tag{index}")).unwrap())
-            .collect()
+    fn tags(count: usize) -> TagSet {
+        TagSet::new(
+            (0..count)
+                .map(|index| Tag::parse(format!("tag{index}")).unwrap())
+                .collect(),
+        )
+        .unwrap()
     }
 
-    fn new_quiz_list(
-        quiz_ids: Vec<QuizId>,
-        tags: BTreeSet<Tag>,
-    ) -> Result<QuizList, QuizListError> {
+    fn new_quiz_list(quiz_ids: Vec<QuizId>, tags: TagSet) -> Result<QuizList, QuizListError> {
         QuizList::new(
             UserId::from_uuid(Uuid::now_v7()),
             QuizListTitle::parse("Capitals").unwrap(),
@@ -641,54 +609,6 @@ mod tests {
             entries(quiz_ids(101)),
             Err(QuizListEntriesError::TooManyQuizzes { count: 101 })
         );
-    }
-
-    #[test]
-    fn creates_quiz_list_at_the_tag_limit() {
-        let quiz_list = new_quiz_list(Vec::new(), tags(10)).unwrap();
-
-        assert_eq!(quiz_list.tags().len(), 10);
-    }
-
-    #[test]
-    fn rejects_more_than_ten_tags() {
-        assert_eq!(
-            new_quiz_list(Vec::new(), tags(11)),
-            Err(QuizListError::TooManyTags { count: 11 })
-        );
-    }
-
-    #[test]
-    fn reconstitution_checks_invariants() {
-        let reconstitute = |tags| {
-            QuizList::reconstitute(
-                QuizListId::new(),
-                UserId::from_uuid(Uuid::now_v7()),
-                QuizListTitle::parse("Capitals").unwrap(),
-                None,
-                Visibility::Private,
-                entries(Vec::new()).unwrap(),
-                tags,
-            )
-        };
-
-        assert!(reconstitute(tags(10)).is_ok());
-        assert_eq!(
-            reconstitute(tags(11)),
-            Err(QuizListError::TooManyTags { count: 11 })
-        );
-    }
-
-    #[test]
-    fn rejected_tag_change_leaves_quiz_list_unchanged() {
-        let mut quiz_list = new_quiz_list(quiz_ids(1), tags(1)).unwrap();
-        let before = quiz_list.clone();
-
-        assert_eq!(
-            quiz_list.change_tags(tags(11)),
-            Err(ChangeTagsError::TooManyTags { count: 11 })
-        );
-        assert_eq!(quiz_list, before);
     }
 
     #[test]

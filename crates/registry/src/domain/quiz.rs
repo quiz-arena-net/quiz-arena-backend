@@ -8,7 +8,7 @@ use uuid::Uuid;
 use super::{
     media::Media,
     response_mode::{DraftResponseMode, ResponseMode, ResponseModeFromDraftError},
-    tag::Tag,
+    tag::{Tag, TagSet, TagSetError},
     user::UserId,
 };
 
@@ -246,10 +246,9 @@ impl QuizContentId {
 
 /// One published version of a quiz's content.
 ///
-/// Guaranteed to carry a prompt text and a canonical answer that are not blank,
-/// a response mode ready for publication and at most 10 tags. Session-specific
-/// behavior, such as how free-input responses are judged, is configured outside
-/// the aggregate.
+/// The invariants are carried by the field types. Session-specific behavior,
+/// such as how free-input responses are judged, is configured outside the
+/// aggregate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuizContent {
     /// Identifies this version.
@@ -268,20 +267,10 @@ pub(crate) struct QuizContent {
     language: Language,
 
     /// Tags associated with this quiz.
-    tags: BTreeSet<Tag>,
+    tags: TagSet,
 }
 
 impl QuizContent {
-    pub(crate) const MAX_TAGS: usize = 10;
-
-    fn check_tags(tags: &BTreeSet<Tag>) -> Result<(), QuizContentError> {
-        let count = tags.len();
-        if count > Self::MAX_TAGS {
-            return Err(QuizContentError::TooManyTags { count });
-        }
-        Ok(())
-    }
-
     /// Creates a new version of the content with a freshly generated
     /// identifier.
     pub(crate) fn new(
@@ -289,40 +278,37 @@ impl QuizContent {
         canonical_answer: CanonicalAnswer,
         response_mode: ResponseMode,
         language: Language,
-        tags: BTreeSet<Tag>,
-    ) -> Result<Self, QuizContentError> {
-        Self::check_tags(&tags)?;
-        Ok(Self {
+        tags: TagSet,
+    ) -> Self {
+        Self {
             id: QuizContentId::new(),
             prompt,
             canonical_answer,
             response_mode,
             language,
             tags,
-        })
+        }
     }
 
     /// Reconstitutes a version of the content from stored state.
     ///
-    /// For repository implementations only. Checks the invariants, which hold
-    /// for every version however it was obtained.
+    /// For repository implementations only.
     pub(crate) fn reconstitute(
         id: QuizContentId,
         prompt: Prompt,
         canonical_answer: CanonicalAnswer,
         response_mode: ResponseMode,
         language: Language,
-        tags: BTreeSet<Tag>,
-    ) -> Result<Self, QuizContentError> {
-        Self::check_tags(&tags)?;
-        Ok(Self {
+        tags: TagSet,
+    ) -> Self {
+        Self {
             id,
             prompt,
             canonical_answer,
             response_mode,
             language,
             tags,
-        })
+        }
     }
 
     pub(crate) fn id(&self) -> QuizContentId {
@@ -345,7 +331,7 @@ impl QuizContent {
         self.language
     }
 
-    pub(crate) fn tags(&self) -> &BTreeSet<Tag> {
+    pub(crate) fn tags(&self) -> &TagSet {
         &self.tags
     }
 }
@@ -376,10 +362,13 @@ impl TryFrom<DraftQuizContent> for QuizContent {
                 None
             }
         };
-        let count = draft.tags.len();
-        if count > Self::MAX_TAGS {
-            errors.push(QuizContentFromDraftError::TooManyTags { count });
-        }
+        let tags = match TagSet::new(draft.tags) {
+            Ok(tags) => Some(tags),
+            Err(TagSetError::TooManyTags { count }) => {
+                errors.push(QuizContentFromDraftError::TooManyTags { count });
+                None
+            }
+        };
         if let Ok(errors) = Vec1::try_from(errors) {
             return Err(errors);
         }
@@ -392,22 +381,15 @@ impl TryFrom<DraftQuizContent> for QuizContent {
             .expect("a missing canonical answer was reported above");
         let response_mode =
             response_mode.expect("a missing or invalid response mode was reported above");
-        let content = Self::new(
+        let tags = tags.expect("too many tags were reported above");
+        Ok(Self::new(
             Prompt::new(prompt_text, draft.prompt_media),
             canonical_answer,
             response_mode,
             draft.language,
-            draft.tags,
-        )
-        .expect("the checks above already passed");
-        Ok(content)
+            tags,
+        ))
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum QuizContentError {
-    #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
-    TooManyTags { count: usize },
 }
 
 /// A reason a draft cannot be published.
@@ -421,7 +403,7 @@ pub(crate) enum QuizContentFromDraftError {
     NoResponseMode,
     #[error("the response mode is not ready for publication")]
     ResponseModeNotReady(ResponseModeFromDraftError),
-    #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
+    #[error("a quiz must have at most {} tags, got {count}", TagSet::MAX_TAGS)]
     TooManyTags { count: usize },
 }
 
@@ -651,33 +633,6 @@ mod tests {
             .collect()
     }
 
-    fn new_content(
-        prompt_text: &str,
-        canonical_answer: &str,
-        response_mode: ResponseMode,
-        tags: BTreeSet<Tag>,
-    ) -> Result<QuizContent, QuizContentError> {
-        QuizContent::new(
-            Prompt::new(PromptText::parse(prompt_text).unwrap(), None),
-            CanonicalAnswer::parse(canonical_answer).unwrap(),
-            response_mode,
-            Language::Eng,
-            tags,
-        )
-    }
-
-    fn complete_content(
-        response_mode: ResponseMode,
-        tags: BTreeSet<Tag>,
-    ) -> Result<QuizContent, QuizContentError> {
-        new_content(
-            "What is the capital of Japan?",
-            "Tokyo",
-            response_mode,
-            tags,
-        )
-    }
-
     #[test]
     fn accepts_text_within_bounds() {
         assert!(PromptText::parse("x".repeat(1000)).is_ok());
@@ -768,21 +723,6 @@ mod tests {
         assert_eq!(PromptText::parse("か\u{3099}").unwrap().as_str(), "が");
     }
 
-    #[test]
-    fn creates_content_with_ten_tags() {
-        let content = complete_content(free_input(), tags(10)).unwrap();
-
-        assert_eq!(content.tags().len(), 10);
-    }
-
-    #[test]
-    fn rejects_more_than_ten_tags() {
-        assert_eq!(
-            complete_content(free_input(), tags(11)),
-            Err(QuizContentError::TooManyTags { count: 11 })
-        );
-    }
-
     fn user() -> UserId {
         UserId::from_uuid(Uuid::now_v7())
     }
@@ -840,7 +780,7 @@ mod tests {
         assert_eq!(content.canonical_answer().as_str(), "Tokyo");
         assert_eq!(content.response_mode(), &free_input());
         assert_eq!(content.language(), Language::Eng);
-        assert_eq!(content.tags(), &tags(1));
+        assert_eq!(content.tags().as_set(), &tags(1));
     }
 
     #[test]

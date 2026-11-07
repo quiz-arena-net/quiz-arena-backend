@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use unicode_normalization::UnicodeNormalization;
 
 /// A tag used to classify or discover quizzes and quiz lists.
@@ -43,9 +45,57 @@ pub(crate) enum TagParseError {
     InvalidCharacter,
 }
 
+/// The tags of a quiz or a quiz list.
+///
+/// Guaranteed to hold at most 10 tags. May be empty.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct TagSet(BTreeSet<Tag>);
+
+impl TagSet {
+    pub(crate) const MAX_TAGS: usize = 10;
+
+    pub(crate) fn new(tags: BTreeSet<Tag>) -> Result<Self, TagSetError> {
+        let count = tags.len();
+        if count > Self::MAX_TAGS {
+            return Err(TagSetError::TooManyTags { count });
+        }
+        Ok(Self(tags))
+    }
+
+    pub(crate) fn as_set(&self) -> &BTreeSet<Tag> {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum TagSetError {
+    #[error("at most {} tags are allowed, got {count}", TagSet::MAX_TAGS)]
+    TooManyTags { count: usize },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tags(count: usize) -> BTreeSet<Tag> {
+        (0..count)
+            .map(|index| Tag::parse(format!("tag{index}")).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn accepts_up_to_ten_tags() {
+        assert!(TagSet::new(tags(0)).is_ok());
+        assert_eq!(TagSet::new(tags(10)).unwrap().as_set().len(), 10);
+    }
+
+    #[test]
+    fn rejects_more_than_ten_tags() {
+        assert_eq!(
+            TagSet::new(tags(11)),
+            Err(TagSetError::TooManyTags { count: 11 })
+        );
+    }
 
     #[test]
     fn accepts_text_within_bounds() {
