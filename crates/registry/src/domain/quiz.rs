@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::{
     media::Media,
-    response_mode::{ResponseMode, ResponseModeValidateError},
+    response_mode::{DraftResponseMode, ResponseMode, ResponseModeFromDraftError},
     tag::Tag,
     user::UserId,
 };
@@ -157,8 +157,8 @@ pub(crate) enum CanonicalAnswerParseError {
 /// A [`QuizContent`] that may still be incomplete.
 ///
 /// Text may be blank, the response mode may be missing or incomplete, and the
-/// tag limit is not enforced. [`DraftQuizContent::validate`] checks all of
-/// this.
+/// tag limit is not enforced. Converting the draft into a [`QuizContent`]
+/// checks all of this.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DraftQuizContent {
     /// The question text.
@@ -171,7 +171,7 @@ pub(crate) struct DraftQuizContent {
     canonical_answer: CanonicalAnswer,
 
     /// The response mode.
-    response_mode: Option<ResponseMode>,
+    response_mode: Option<DraftResponseMode>,
 
     /// The language of the quiz.
     language: Language,
@@ -185,7 +185,7 @@ impl DraftQuizContent {
         prompt_text: PromptText,
         prompt_media: Option<Media>,
         canonical_answer: CanonicalAnswer,
-        response_mode: Option<ResponseMode>,
+        response_mode: Option<DraftResponseMode>,
         language: Language,
         tags: BTreeSet<Tag>,
     ) -> Self {
@@ -211,7 +211,7 @@ impl DraftQuizContent {
         &self.canonical_answer
     }
 
-    pub(crate) fn response_mode(&self) -> Option<&ResponseMode> {
+    pub(crate) fn response_mode(&self) -> Option<&DraftResponseMode> {
         self.response_mode.as_ref()
     }
 
@@ -222,67 +222,6 @@ impl DraftQuizContent {
     pub(crate) fn tags(&self) -> &BTreeSet<Tag> {
         &self.tags
     }
-
-    /// Validates all fields and returns content ready for publication.
-    ///
-    /// Returns all violations instead of stopping at the first one.
-    pub(crate) fn validate(&self) -> Result<QuizContent, Vec1<DraftQuizContentValidateError>> {
-        let mut errors = Vec::new();
-        if self.prompt_text.is_blank() {
-            errors.push(DraftQuizContentValidateError::BlankPromptText);
-        }
-        if self.canonical_answer.is_blank() {
-            errors.push(DraftQuizContentValidateError::BlankCanonicalAnswer);
-        }
-        match &self.response_mode {
-            Some(response_mode) => {
-                if let Err(mode_errors) = response_mode.validate() {
-                    errors.extend(
-                        mode_errors
-                            .into_iter()
-                            .map(DraftQuizContentValidateError::InvalidResponseMode),
-                    );
-                }
-            }
-            None => errors.push(DraftQuizContentValidateError::NoResponseMode),
-        }
-        let count = self.tags.len();
-        if count > QuizContent::MAX_TAGS {
-            errors.push(DraftQuizContentValidateError::TooManyTags { count });
-        }
-        if let Ok(errors) = Vec1::try_from(errors) {
-            return Err(errors);
-        }
-
-        let response_mode = self
-            .response_mode
-            .clone()
-            .expect("a missing response mode was reported above");
-        let content = QuizContent::new(
-            Prompt::new(self.prompt_text.clone(), self.prompt_media),
-            self.canonical_answer.clone(),
-            response_mode,
-            self.language,
-            self.tags.clone(),
-        )
-        .expect("the checks above already passed");
-        Ok(content)
-    }
-}
-
-/// A reason a draft cannot be published.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum DraftQuizContentValidateError {
-    #[error("prompt text must not be empty or only whitespace")]
-    BlankPromptText,
-    #[error("canonical answer must not be empty or only whitespace")]
-    BlankCanonicalAnswer,
-    #[error("a quiz must have a response mode")]
-    NoResponseMode,
-    #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
-    TooManyTags { count: usize },
-    #[error("the response mode is not ready for publication")]
-    InvalidResponseMode(ResponseModeValidateError),
 }
 
 /// Identifies one published version of a quiz's content.
@@ -351,12 +290,6 @@ impl QuizContent {
         Ok(())
     }
 
-    fn check_response_mode(response_mode: &ResponseMode) -> Result<(), QuizContentError> {
-        response_mode
-            .validate()
-            .map_err(QuizContentError::InvalidResponseMode)
-    }
-
     fn check_tags(tags: &BTreeSet<Tag>) -> Result<(), QuizContentError> {
         let count = tags.len();
         if count > Self::MAX_TAGS {
@@ -376,7 +309,6 @@ impl QuizContent {
     ) -> Result<Self, QuizContentError> {
         Self::check_prompt(&prompt)?;
         Self::check_canonical_answer(&canonical_answer)?;
-        Self::check_response_mode(&response_mode)?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id: QuizContentId::new(),
@@ -402,7 +334,6 @@ impl QuizContent {
     ) -> Result<Self, QuizContentError> {
         Self::check_prompt(&prompt)?;
         Self::check_canonical_answer(&canonical_answer)?;
-        Self::check_response_mode(&response_mode)?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id,
@@ -439,17 +370,79 @@ impl QuizContent {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+impl TryFrom<DraftQuizContent> for QuizContent {
+    type Error = Vec1<QuizContentFromDraftError>;
+
+    /// Checks every field and returns all violations instead of stopping at the
+    /// first one.
+    fn try_from(draft: DraftQuizContent) -> Result<Self, Self::Error> {
+        let mut errors = Vec::new();
+        if draft.prompt_text.is_blank() {
+            errors.push(QuizContentFromDraftError::BlankPromptText);
+        }
+        if draft.canonical_answer.is_blank() {
+            errors.push(QuizContentFromDraftError::BlankCanonicalAnswer);
+        }
+        let response_mode = match draft.response_mode {
+            Some(response_mode) => match ResponseMode::try_from(response_mode) {
+                Ok(response_mode) => Some(response_mode),
+                Err(error) => {
+                    errors.push(QuizContentFromDraftError::ResponseModeNotReady(error));
+                    None
+                }
+            },
+            None => {
+                errors.push(QuizContentFromDraftError::NoResponseMode);
+                None
+            }
+        };
+        let count = draft.tags.len();
+        if count > Self::MAX_TAGS {
+            errors.push(QuizContentFromDraftError::TooManyTags { count });
+        }
+        if let Ok(errors) = Vec1::try_from(errors) {
+            return Err(errors);
+        }
+
+        let response_mode =
+            response_mode.expect("a missing or invalid response mode was reported above");
+        let content = Self::new(
+            Prompt::new(draft.prompt_text, draft.prompt_media),
+            draft.canonical_answer,
+            response_mode,
+            draft.language,
+            draft.tags,
+        )
+        .expect("the checks above already passed");
+        Ok(content)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum QuizContentError {
     #[error("prompt text must not be empty or only whitespace")]
     BlankPromptText,
     #[error("canonical answer must not be empty or only whitespace")]
     BlankCanonicalAnswer,
-    #[error("the response mode is not ready for publication")]
-    InvalidResponseMode(Vec1<ResponseModeValidateError>),
     #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
     TooManyTags { count: usize },
 }
+
+/// A reason a draft cannot be published.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum QuizContentFromDraftError {
+    #[error("prompt text must not be empty or only whitespace")]
+    BlankPromptText,
+    #[error("canonical answer must not be empty or only whitespace")]
+    BlankCanonicalAnswer,
+    #[error("a quiz must have a response mode")]
+    NoResponseMode,
+    #[error("the response mode is not ready for publication")]
+    ResponseModeNotReady(ResponseModeFromDraftError),
+    #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
+    TooManyTags { count: usize },
+}
+
 /// Whose quiz lists may include a quiz.
 ///
 /// Sessions pose quizzes through quiz lists. This policy governs who may
@@ -613,7 +606,7 @@ impl Quiz {
             } => draft,
             QuizState::Published { draft: None, .. } => return Err(PublishError::NoDraft),
         };
-        let content = draft.validate().map_err(PublishError::Invalid)?;
+        let content = QuizContent::try_from(draft.clone()).map_err(PublishError::DraftNotReady)?;
         self.state = QuizState::Published {
             content,
             draft: None,
@@ -643,18 +636,31 @@ pub(crate) enum PublishError {
     #[error("the quiz has no draft")]
     NoDraft,
     #[error("the draft is not ready for publication")]
-    Invalid(Vec1<DraftQuizContentValidateError>),
+    DraftNotReady(Vec1<QuizContentFromDraftError>),
 }
 
 #[cfg(test)]
 mod tests {
+    use mitsein::btree_set1::BTreeSet1;
+
     use super::*;
-    use crate::domain::response_mode::{FreeInput, FreeInputAnswer};
+    use crate::domain::response_mode::{
+        DraftFreeInput, FreeInput, FreeInputAnswer, FreeInputFromDraftError,
+    };
 
     fn free_input() -> ResponseMode {
         ResponseMode::FreeInput(
-            FreeInput::new(BTreeSet::from([FreeInputAnswer::parse("Tokyo").unwrap()])).unwrap(),
+            FreeInput::new(BTreeSet1::from_one(
+                FreeInputAnswer::parse("Tokyo").unwrap(),
+            ))
+            .unwrap(),
         )
+    }
+
+    fn draft_free_input() -> DraftResponseMode {
+        DraftResponseMode::FreeInput(DraftFreeInput::new(BTreeSet::from([
+            FreeInputAnswer::parse("Tokyo").unwrap(),
+        ])))
     }
 
     fn tags(count: usize) -> BTreeSet<Tag> {
@@ -807,18 +813,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rejects_an_incomplete_response_mode() {
-        let free_input = ResponseMode::FreeInput(FreeInput::new(BTreeSet::new()).unwrap());
-
-        assert_eq!(
-            complete_content(free_input, tags(0)),
-            Err(QuizContentError::InvalidResponseMode(Vec1::from_one(
-                ResponseModeValidateError::NoExpectedAnswer
-            )))
-        );
-    }
-
     fn user() -> UserId {
         UserId::from_uuid(Uuid::now_v7())
     }
@@ -826,7 +820,7 @@ mod tests {
     fn new_draft(
         prompt_text: &str,
         canonical_answer: &str,
-        response_mode: Option<ResponseMode>,
+        response_mode: Option<DraftResponseMode>,
         tags: BTreeSet<Tag>,
     ) -> DraftQuizContent {
         DraftQuizContent::new(
@@ -843,7 +837,7 @@ mod tests {
         new_draft(
             "What is the capital of Japan?",
             "Tokyo",
-            Some(free_input()),
+            Some(draft_free_input()),
             tags(1),
         )
     }
@@ -866,8 +860,8 @@ mod tests {
     }
 
     #[test]
-    fn validates_a_complete_draft() {
-        let content = complete_draft().validate().unwrap();
+    fn converts_a_complete_draft() {
+        let content = QuizContent::try_from(complete_draft()).unwrap();
 
         assert_eq!(
             content.prompt().text().as_str(),
@@ -884,13 +878,13 @@ mod tests {
         let draft = new_draft(" ", "", None, tags(11));
 
         assert_eq!(
-            draft.validate(),
+            QuizContent::try_from(draft),
             Err(Vec1::from_head_and_tail(
-                DraftQuizContentValidateError::BlankPromptText,
+                QuizContentFromDraftError::BlankPromptText,
                 [
-                    DraftQuizContentValidateError::BlankCanonicalAnswer,
-                    DraftQuizContentValidateError::NoResponseMode,
-                    DraftQuizContentValidateError::TooManyTags { count: 11 },
+                    QuizContentFromDraftError::BlankCanonicalAnswer,
+                    QuizContentFromDraftError::NoResponseMode,
+                    QuizContentFromDraftError::TooManyTags { count: 11 },
                 ]
             ))
         );
@@ -898,14 +892,16 @@ mod tests {
 
     #[test]
     fn reports_an_invalid_response_mode_of_a_draft() {
-        let free_input = ResponseMode::FreeInput(FreeInput::new(BTreeSet::new()).unwrap());
+        let free_input = DraftResponseMode::FreeInput(DraftFreeInput::new(BTreeSet::new()));
         let draft = new_draft("Q", "A", Some(free_input), tags(0));
 
         assert_eq!(
-            draft.validate(),
+            QuizContent::try_from(draft),
             Err(Vec1::from_one(
-                DraftQuizContentValidateError::InvalidResponseMode(
-                    ResponseModeValidateError::NoExpectedAnswer
+                QuizContentFromDraftError::ResponseModeNotReady(
+                    ResponseModeFromDraftError::FreeInput(
+                        FreeInputFromDraftError::NoExpectedAnswer
+                    )
                 )
             ))
         );
@@ -956,7 +952,7 @@ mod tests {
     fn publishes_the_draft_as_a_new_version() {
         let mut quiz = published_quiz(user());
         let first_version = published_content(&quiz).id();
-        quiz.edit_draft(new_draft("Q", "Kyoto", Some(free_input()), tags(0)));
+        quiz.edit_draft(new_draft("Q", "Kyoto", Some(draft_free_input()), tags(0)));
 
         quiz.publish().unwrap();
 
@@ -973,14 +969,14 @@ mod tests {
 
     #[test]
     fn publishing_an_invalid_draft_reports_the_violations() {
-        let draft = new_draft("", "Tokyo", Some(free_input()), tags(0));
+        let draft = new_draft("", "Tokyo", Some(draft_free_input()), tags(0));
         let mut quiz = Quiz::new(user(), draft, InclusionPolicy::AuthorOnly);
         let before = quiz.clone();
 
         assert_eq!(
             quiz.publish(),
-            Err(PublishError::Invalid(Vec1::from_one(
-                DraftQuizContentValidateError::BlankPromptText
+            Err(PublishError::DraftNotReady(Vec1::from_one(
+                QuizContentFromDraftError::BlankPromptText
             )))
         );
         assert_eq!(quiz, before);
