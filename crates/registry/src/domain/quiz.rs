@@ -32,9 +32,8 @@ impl QuizId {
 }
 /// The question text presented to players.
 ///
-/// Guaranteed to be at most 1000 characters in NFC, with no control characters
-/// other than newline and tab. May be blank, which only a draft is allowed to
-/// be.
+/// Guaranteed to be 1 to 1000 characters in NFC, not only whitespace, with no
+/// control characters other than newline and tab.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct PromptText(String);
 
@@ -46,6 +45,9 @@ impl PromptText {
     /// Normalizes the input text to NFC.
     pub(crate) fn parse(text: impl Into<String>) -> Result<Self, PromptTextParseError> {
         let text: String = text.into().nfc().collect();
+        if text.trim().is_empty() {
+            return Err(PromptTextParseError::Blank);
+        }
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
             return Err(PromptTextParseError::TooLong { length });
@@ -62,15 +64,12 @@ impl PromptText {
     pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
-
-    /// Returns whether the text is empty or only whitespace.
-    pub(crate) fn is_blank(&self) -> bool {
-        self.0.trim().is_empty()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum PromptTextParseError {
+    #[error("prompt text must not be empty or only whitespace")]
+    Blank,
     #[error(
         "prompt text must be at most {} characters, got {length}",
         PromptText::MAX_LENGTH
@@ -109,9 +108,8 @@ impl Prompt {
 /// This is intended for presentation and does not necessarily correspond
 /// exactly to the representation accepted by a particular [`ResponseMode`].
 ///
-/// Guaranteed to be at most 200 characters in NFC, with no surrounding
-/// whitespace and no control characters. May be blank, which only a draft is
-/// allowed to be.
+/// Guaranteed to be 1 to 200 characters in NFC, with no surrounding whitespace
+/// and no control characters.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct CanonicalAnswer(String);
 
@@ -123,6 +121,9 @@ impl CanonicalAnswer {
     /// Trims surrounding whitespace and normalizes the input text to NFC.
     pub(crate) fn parse(text: impl Into<String>) -> Result<Self, CanonicalAnswerParseError> {
         let text: String = text.into().trim().nfc().collect();
+        if text.is_empty() {
+            return Err(CanonicalAnswerParseError::Blank);
+        }
         let length = text.chars().count();
         if length > Self::MAX_LENGTH {
             return Err(CanonicalAnswerParseError::TooLong { length });
@@ -136,15 +137,12 @@ impl CanonicalAnswer {
     pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
-
-    /// Returns whether the text is empty or only whitespace.
-    pub(crate) fn is_blank(&self) -> bool {
-        self.0.trim().is_empty()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum CanonicalAnswerParseError {
+    #[error("canonical answer must not be empty or only whitespace")]
+    Blank,
     #[error(
         "canonical answer must be at most {} characters, got {length}",
         CanonicalAnswer::MAX_LENGTH
@@ -156,19 +154,19 @@ pub(crate) enum CanonicalAnswerParseError {
 
 /// A [`QuizContent`] that may still be incomplete.
 ///
-/// Text may be blank, the response mode may be missing or incomplete, and the
-/// tag limit is not enforced. Converting the draft into a [`QuizContent`]
-/// checks all of this.
+/// The question text, the canonical answer and the response mode may be
+/// missing, the response mode may be incomplete, and the tag limit is not
+/// enforced. Converting the draft into a [`QuizContent`] checks all of this.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DraftQuizContent {
     /// The question text.
-    prompt_text: PromptText,
+    prompt_text: Option<PromptText>,
 
     /// Media presented alongside the question text.
     prompt_media: Option<Media>,
 
     /// The canonical answer.
-    canonical_answer: CanonicalAnswer,
+    canonical_answer: Option<CanonicalAnswer>,
 
     /// The response mode.
     response_mode: Option<DraftResponseMode>,
@@ -182,9 +180,9 @@ pub(crate) struct DraftQuizContent {
 
 impl DraftQuizContent {
     pub(crate) fn new(
-        prompt_text: PromptText,
+        prompt_text: Option<PromptText>,
         prompt_media: Option<Media>,
-        canonical_answer: CanonicalAnswer,
+        canonical_answer: Option<CanonicalAnswer>,
         response_mode: Option<DraftResponseMode>,
         language: Language,
         tags: BTreeSet<Tag>,
@@ -199,16 +197,16 @@ impl DraftQuizContent {
         }
     }
 
-    pub(crate) fn prompt_text(&self) -> &PromptText {
-        &self.prompt_text
+    pub(crate) fn prompt_text(&self) -> Option<&PromptText> {
+        self.prompt_text.as_ref()
     }
 
     pub(crate) fn prompt_media(&self) -> Option<Media> {
         self.prompt_media
     }
 
-    pub(crate) fn canonical_answer(&self) -> &CanonicalAnswer {
-        &self.canonical_answer
+    pub(crate) fn canonical_answer(&self) -> Option<&CanonicalAnswer> {
+        self.canonical_answer.as_ref()
     }
 
     pub(crate) fn response_mode(&self) -> Option<&DraftResponseMode> {
@@ -276,20 +274,6 @@ pub(crate) struct QuizContent {
 impl QuizContent {
     pub(crate) const MAX_TAGS: usize = 10;
 
-    fn check_prompt(prompt: &Prompt) -> Result<(), QuizContentError> {
-        if prompt.text().is_blank() {
-            return Err(QuizContentError::BlankPromptText);
-        }
-        Ok(())
-    }
-
-    fn check_canonical_answer(canonical_answer: &CanonicalAnswer) -> Result<(), QuizContentError> {
-        if canonical_answer.is_blank() {
-            return Err(QuizContentError::BlankCanonicalAnswer);
-        }
-        Ok(())
-    }
-
     fn check_tags(tags: &BTreeSet<Tag>) -> Result<(), QuizContentError> {
         let count = tags.len();
         if count > Self::MAX_TAGS {
@@ -307,8 +291,6 @@ impl QuizContent {
         language: Language,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizContentError> {
-        Self::check_prompt(&prompt)?;
-        Self::check_canonical_answer(&canonical_answer)?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id: QuizContentId::new(),
@@ -332,8 +314,6 @@ impl QuizContent {
         language: Language,
         tags: BTreeSet<Tag>,
     ) -> Result<Self, QuizContentError> {
-        Self::check_prompt(&prompt)?;
-        Self::check_canonical_answer(&canonical_answer)?;
         Self::check_tags(&tags)?;
         Ok(Self {
             id,
@@ -377,11 +357,11 @@ impl TryFrom<DraftQuizContent> for QuizContent {
     /// first one.
     fn try_from(draft: DraftQuizContent) -> Result<Self, Self::Error> {
         let mut errors = Vec::new();
-        if draft.prompt_text.is_blank() {
-            errors.push(QuizContentFromDraftError::BlankPromptText);
+        if draft.prompt_text.is_none() {
+            errors.push(QuizContentFromDraftError::NoPromptText);
         }
-        if draft.canonical_answer.is_blank() {
-            errors.push(QuizContentFromDraftError::BlankCanonicalAnswer);
+        if draft.canonical_answer.is_none() {
+            errors.push(QuizContentFromDraftError::NoCanonicalAnswer);
         }
         let response_mode = match draft.response_mode {
             Some(response_mode) => match ResponseMode::try_from(response_mode) {
@@ -404,11 +384,17 @@ impl TryFrom<DraftQuizContent> for QuizContent {
             return Err(errors);
         }
 
+        let prompt_text = draft
+            .prompt_text
+            .expect("missing prompt text was reported above");
+        let canonical_answer = draft
+            .canonical_answer
+            .expect("a missing canonical answer was reported above");
         let response_mode =
             response_mode.expect("a missing or invalid response mode was reported above");
         let content = Self::new(
-            Prompt::new(draft.prompt_text, draft.prompt_media),
-            draft.canonical_answer,
+            Prompt::new(prompt_text, draft.prompt_media),
+            canonical_answer,
             response_mode,
             draft.language,
             draft.tags,
@@ -420,10 +406,6 @@ impl TryFrom<DraftQuizContent> for QuizContent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum QuizContentError {
-    #[error("prompt text must not be empty or only whitespace")]
-    BlankPromptText,
-    #[error("canonical answer must not be empty or only whitespace")]
-    BlankCanonicalAnswer,
     #[error("a quiz must have at most {} tags, got {count}", QuizContent::MAX_TAGS)]
     TooManyTags { count: usize },
 }
@@ -431,10 +413,10 @@ pub(crate) enum QuizContentError {
 /// A reason a draft cannot be published.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum QuizContentFromDraftError {
-    #[error("prompt text must not be empty or only whitespace")]
-    BlankPromptText,
-    #[error("canonical answer must not be empty or only whitespace")]
-    BlankCanonicalAnswer,
+    #[error("a quiz must have prompt text")]
+    NoPromptText,
+    #[error("a quiz must have a canonical answer")]
+    NoCanonicalAnswer,
     #[error("a quiz must have a response mode")]
     NoResponseMode,
     #[error("the response mode is not ready for publication")]
@@ -703,20 +685,20 @@ mod tests {
     }
 
     #[test]
-    fn accepts_blank_text() {
-        for text in ["", " ", "\t\n", "\u{3000}"] {
-            assert!(PromptText::parse(text).unwrap().is_blank(), "{text:?}");
-            assert!(CanonicalAnswer::parse(text).unwrap().is_blank(), "{text:?}");
+    fn rejects_blank_text() {
+        for text in ["", " ", "\t\n", "\u{3000}", &" ".repeat(1001)] {
+            assert_eq!(
+                PromptText::parse(text),
+                Err(PromptTextParseError::Blank),
+                "{text:?}"
+            );
+            assert_eq!(
+                CanonicalAnswer::parse(text),
+                Err(CanonicalAnswerParseError::Blank),
+                "{text:?}"
+            );
         }
-        assert!(!PromptText::parse(" x ").unwrap().is_blank());
-    }
-
-    #[test]
-    fn rejects_blank_text_over_the_limit() {
-        assert_eq!(
-            PromptText::parse(" ".repeat(1001)),
-            Err(PromptTextParseError::TooLong { length: 1001 })
-        );
+        assert!(PromptText::parse(" x ").is_ok());
     }
 
     #[test]
@@ -794,18 +776,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_blank_content_text() {
-        assert_eq!(
-            new_content(" ", "Tokyo", free_input(), tags(0)),
-            Err(QuizContentError::BlankPromptText)
-        );
-        assert_eq!(
-            new_content("Q", "", free_input(), tags(0)),
-            Err(QuizContentError::BlankCanonicalAnswer)
-        );
-    }
-
-    #[test]
     fn rejects_more_than_ten_tags() {
         assert_eq!(
             complete_content(free_input(), tags(11)),
@@ -818,15 +788,15 @@ mod tests {
     }
 
     fn new_draft(
-        prompt_text: &str,
-        canonical_answer: &str,
+        prompt_text: Option<&str>,
+        canonical_answer: Option<&str>,
         response_mode: Option<DraftResponseMode>,
         tags: BTreeSet<Tag>,
     ) -> DraftQuizContent {
         DraftQuizContent::new(
-            PromptText::parse(prompt_text).unwrap(),
+            prompt_text.map(|text| PromptText::parse(text).unwrap()),
             None,
-            CanonicalAnswer::parse(canonical_answer).unwrap(),
+            canonical_answer.map(|text| CanonicalAnswer::parse(text).unwrap()),
             response_mode,
             Language::Eng,
             tags,
@@ -835,8 +805,8 @@ mod tests {
 
     fn complete_draft() -> DraftQuizContent {
         new_draft(
-            "What is the capital of Japan?",
-            "Tokyo",
+            Some("What is the capital of Japan?"),
+            Some("Tokyo"),
             Some(draft_free_input()),
             tags(1),
         )
@@ -875,14 +845,14 @@ mod tests {
 
     #[test]
     fn reports_every_violation_of_a_draft() {
-        let draft = new_draft(" ", "", None, tags(11));
+        let draft = new_draft(None, None, None, tags(11));
 
         assert_eq!(
             QuizContent::try_from(draft),
             Err(Vec1::from_head_and_tail(
-                QuizContentFromDraftError::BlankPromptText,
+                QuizContentFromDraftError::NoPromptText,
                 [
-                    QuizContentFromDraftError::BlankCanonicalAnswer,
+                    QuizContentFromDraftError::NoCanonicalAnswer,
                     QuizContentFromDraftError::NoResponseMode,
                     QuizContentFromDraftError::TooManyTags { count: 11 },
                 ]
@@ -893,7 +863,7 @@ mod tests {
     #[test]
     fn reports_an_invalid_response_mode_of_a_draft() {
         let free_input = DraftResponseMode::FreeInput(DraftFreeInput::new(BTreeSet::new()));
-        let draft = new_draft("Q", "A", Some(free_input), tags(0));
+        let draft = new_draft(Some("Q"), Some("A"), Some(free_input), tags(0));
 
         assert_eq!(
             QuizContent::try_from(draft),
@@ -952,7 +922,12 @@ mod tests {
     fn publishes_the_draft_as_a_new_version() {
         let mut quiz = published_quiz(user());
         let first_version = published_content(&quiz).id();
-        quiz.edit_draft(new_draft("Q", "Kyoto", Some(draft_free_input()), tags(0)));
+        quiz.edit_draft(new_draft(
+            Some("Q"),
+            Some("Kyoto"),
+            Some(draft_free_input()),
+            tags(0),
+        ));
 
         quiz.publish().unwrap();
 
@@ -969,14 +944,14 @@ mod tests {
 
     #[test]
     fn publishing_an_invalid_draft_reports_the_violations() {
-        let draft = new_draft("", "Tokyo", Some(draft_free_input()), tags(0));
+        let draft = new_draft(None, Some("Tokyo"), Some(draft_free_input()), tags(0));
         let mut quiz = Quiz::new(user(), draft, InclusionPolicy::AuthorOnly);
         let before = quiz.clone();
 
         assert_eq!(
             quiz.publish(),
             Err(PublishError::DraftNotReady(Vec1::from_one(
-                QuizContentFromDraftError::BlankPromptText
+                QuizContentFromDraftError::NoPromptText
             )))
         );
         assert_eq!(quiz, before);
@@ -991,7 +966,7 @@ mod tests {
 
     #[test]
     fn editing_replaces_the_draft() {
-        let draft = new_draft("Q", "A", None, tags(0));
+        let draft = new_draft(Some("Q"), Some("A"), None, tags(0));
         let mut unpublished = unpublished_quiz(user());
         let mut published = published_quiz(user());
 
@@ -1013,7 +988,7 @@ mod tests {
     #[test]
     fn discards_the_draft_of_a_published_quiz() {
         let mut quiz = published_quiz(user());
-        quiz.edit_draft(new_draft("Q", "A", None, tags(0)));
+        quiz.edit_draft(new_draft(Some("Q"), Some("A"), None, tags(0)));
 
         assert_eq!(quiz.discard_draft(), Ok(()));
         assert!(matches!(
