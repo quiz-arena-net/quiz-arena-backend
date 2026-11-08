@@ -1,8 +1,11 @@
 use std::collections::BTreeSet;
 
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
+
+use quiz_arena_shared::kernel::domain::{Page, RepositoryError};
 
 use super::{
     quiz::{Quiz, QuizId},
@@ -518,6 +521,45 @@ pub(crate) enum RemoveQuizError {
 pub(crate) enum ReorderError {
     #[error("the new order must contain exactly the quizzes currently in the list")]
     NotAPermutation,
+}
+
+/// Persistence port for [`QuizList`] aggregates.
+///
+/// All failures are reported as [`RepositoryError`], including concurrent
+/// deletions as [`RepositoryError::Conflict`].
+#[async_trait]
+pub(crate) trait QuizListRepository: Send + Sync {
+    /// Finds a quiz list by its identifier, returning `None` if it does not
+    /// exist.
+    async fn find_by_id(&self, id: QuizListId) -> Result<Option<QuizList>, RepositoryError>;
+
+    /// Lists quiz lists owned by `owner`, ordered by `order` and paginated by
+    /// `page`.
+    async fn find_by_owner(
+        &self,
+        owner: UserId,
+        order: QuizListOrder,
+        page: Page<50>,
+    ) -> Result<Vec<QuizList>, RepositoryError>;
+
+    /// Persists a new quiz list.
+    async fn add(&self, quiz_list: &QuizList) -> Result<(), RepositoryError>;
+
+    /// Persists changes to an existing quiz list.
+    async fn update(&self, quiz_list: &QuizList) -> Result<(), RepositoryError>;
+
+    /// Removes a quiz list.
+    async fn remove(&self, id: QuizListId) -> Result<(), RepositoryError>;
+}
+
+/// The order of a quiz list listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum QuizListOrder {
+    /// Most recently created first.
+    CreatedAtDescending,
+
+    /// Most recently changed first.
+    UpdatedAtDescending,
 }
 
 #[cfg(test)]

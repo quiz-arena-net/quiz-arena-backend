@@ -21,3 +21,4 @@ unicode-normalization.workspace = true
 unicode-properties.workspace = true
 url.workspace = true
 uuid.workspace = true
+async-trait.workspace = true

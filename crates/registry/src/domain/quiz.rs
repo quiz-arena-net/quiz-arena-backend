@@ -1,8 +1,11 @@
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use isolang::Language;
 use mitsein::vec1::Vec1;
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
+
+use quiz_arena_shared::kernel::domain::{Page, RepositoryError};
 
 use super::{
     media::Media,
@@ -694,6 +697,47 @@ pub(crate) enum PublishError {
     NoDraft,
     #[error("the draft is not ready for publication")]
     DraftNotReady(Vec1<QuizContentFromDraftError>),
+}
+
+/// Persistence port for [`Quiz`] aggregates.
+///
+/// All failures are reported as [`RepositoryError`], including concurrent
+/// deletions as [`RepositoryError::Conflict`].
+///
+/// Published content versions are retained until the quiz is removed, as
+/// sessions and statistics reference their identifiers.
+#[async_trait]
+pub(crate) trait QuizRepository: Send + Sync {
+    /// Finds a quiz by its identifier, returning `None` if it does not exist.
+    async fn find_by_id(&self, id: QuizId) -> Result<Option<Quiz>, RepositoryError>;
+
+    /// Lists quizzes owned by `owner`, ordered by `order` and paginated by
+    /// `page`.
+    async fn find_by_owner(
+        &self,
+        owner: UserId,
+        order: QuizOrder,
+        page: Page<50>,
+    ) -> Result<Vec<Quiz>, RepositoryError>;
+
+    /// Persists a new quiz.
+    async fn add(&self, quiz: &Quiz) -> Result<(), RepositoryError>;
+
+    /// Persists changes to an existing quiz.
+    async fn update(&self, quiz: &Quiz) -> Result<(), RepositoryError>;
+
+    /// Removes a quiz and all of its published content versions.
+    async fn remove(&self, id: QuizId) -> Result<(), RepositoryError>;
+}
+
+/// The order of a quiz listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum QuizOrder {
+    /// Most recently created first.
+    CreatedAtDescending,
+
+    /// Most recently changed first.
+    UpdatedAtDescending,
 }
 
 #[cfg(test)]
