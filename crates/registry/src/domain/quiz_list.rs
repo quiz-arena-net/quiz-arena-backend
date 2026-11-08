@@ -592,9 +592,14 @@ mod tests {
     #[test]
     fn rejects_duplicate_quiz() {
         let quiz_id = QuizId::new();
+        let quiz_ids = vec![quiz_id, QuizId::new(), quiz_id];
 
         assert_eq!(
-            entries(vec![quiz_id, QuizId::new(), quiz_id]),
+            entries(quiz_ids.clone()),
+            Err(QuizListEntriesError::DuplicateQuiz)
+        );
+        assert_eq!(
+            QuizListEntries::reconstitute(QuizListEntriesId::new(), quiz_ids),
             Err(QuizListEntriesError::DuplicateQuiz)
         );
     }
@@ -605,6 +610,21 @@ mod tests {
             entries(quiz_ids(101)),
             Err(QuizListEntriesError::TooManyQuizzes { count: 101 })
         );
+        assert_eq!(
+            QuizListEntries::reconstitute(QuizListEntriesId::new(), quiz_ids(101)),
+            Err(QuizListEntriesError::TooManyQuizzes { count: 101 })
+        );
+    }
+
+    #[test]
+    fn reconstitute_keeps_the_identifier() {
+        let id = QuizListEntriesId::new();
+        let quiz_ids = quiz_ids(2);
+
+        let entries = QuizListEntries::reconstitute(id, quiz_ids.clone()).unwrap();
+
+        assert_eq!(entries.id(), id);
+        assert_eq!(entries.quiz_ids(), quiz_ids);
     }
 
     #[test]
