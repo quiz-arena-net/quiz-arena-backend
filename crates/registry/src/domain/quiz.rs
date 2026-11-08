@@ -576,12 +576,18 @@ impl Quiz {
         user == self.owner
     }
 
+    /// Returns whether this quiz has been published.
+    pub(crate) fn is_published(&self) -> bool {
+        matches!(self.state, QuizState::Published { .. })
+    }
+
     /// Returns whether a quiz list owned by `list_owner` may include this quiz.
     ///
-    /// The owner always may. Anyone else may only under
-    /// [`InclusionPolicy::Anyone`].
+    /// Only a published quiz may be included. The owner always may include it.
+    /// Anyone else may only under [`InclusionPolicy::Anyone`].
     pub(crate) fn is_includable_by(&self, list_owner: UserId) -> bool {
-        list_owner == self.owner || self.inclusion_policy == InclusionPolicy::Anyone
+        self.is_published()
+            && (list_owner == self.owner || self.inclusion_policy == InclusionPolicy::Anyone)
     }
 
     /// Replaces the draft. Starts one if the quiz has none.
@@ -940,7 +946,7 @@ mod tests {
     fn inclusion_follows_the_policy() {
         let owner = user();
         let other = user();
-        let mut quiz = unpublished_quiz(owner);
+        let mut quiz = published_quiz(owner);
 
         assert!(quiz.is_includable_by(owner));
         assert!(!quiz.is_includable_by(other));
@@ -950,6 +956,16 @@ mod tests {
         assert_eq!(quiz.inclusion_policy(), InclusionPolicy::Anyone);
         assert!(quiz.is_includable_by(owner));
         assert!(quiz.is_includable_by(other));
+    }
+
+    #[test]
+    fn an_unpublished_quiz_is_not_includable() {
+        let owner = user();
+        let mut quiz = unpublished_quiz(owner);
+        quiz.change_inclusion_policy(InclusionPolicy::Anyone);
+
+        assert!(!quiz.is_published());
+        assert!(!quiz.is_includable_by(owner));
     }
 
     #[test]

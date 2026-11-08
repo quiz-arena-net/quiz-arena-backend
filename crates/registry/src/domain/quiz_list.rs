@@ -3,7 +3,11 @@ use std::collections::BTreeSet;
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
-use super::{quiz::QuizId, tag::TagSet, user::UserId};
+use super::{
+    quiz::{Quiz, QuizId},
+    tag::TagSet,
+    user::UserId,
+};
 
 /// Uniquely identifies a quiz list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -375,18 +379,25 @@ impl QuizList {
 
     /// Inserts a quiz at `position`, or appends it when `position` is `None`.
     ///
-    /// Replaces the entries with a new version.
+    /// The quiz must be published and must allow inclusion in a list owned by
+    /// this list's owner. Replaces the entries with a new version.
     pub(crate) fn add_quiz(
         &mut self,
-        quiz_id: QuizId,
+        quiz: &Quiz,
         position: Option<usize>,
     ) -> Result<(), AddQuizError> {
+        if !quiz.is_published() {
+            return Err(AddQuizError::QuizUnpublished);
+        }
+        if !quiz.is_includable_by(self.owner) {
+            return Err(AddQuizError::QuizNotIncludable);
+        }
         let mut quiz_ids = self.entries.quiz_ids().to_vec();
         let position = position.unwrap_or(quiz_ids.len());
         if position > quiz_ids.len() {
             return Err(AddQuizError::PositionOutOfRange { position });
         }
-        quiz_ids.insert(position, quiz_id);
+        quiz_ids.insert(position, quiz.id());
         self.entries = QuizListEntries::new(quiz_ids).map_err(|error| match error {
             QuizListEntriesError::DuplicateQuiz => AddQuizError::DuplicateQuiz,
             QuizListEntriesError::TooManyQuizzes { count } => {
@@ -440,6 +451,10 @@ impl PartialEq for QuizList {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum AddQuizError {
+    #[error("an unpublished quiz cannot be added to a quiz list")]
+    QuizUnpublished,
+    #[error("the quiz does not allow inclusion in this quiz list")]
+    QuizNotIncludable,
     #[error("a quiz list must not contain the same quiz twice")]
     DuplicateQuiz,
     #[error(
@@ -465,11 +480,61 @@ pub(crate) enum ReorderError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
+    use isolang::Language;
+
     use super::*;
-    use crate::domain::tag::Tag;
+    use crate::domain::{
+        quiz::{CanonicalAnswer, DraftQuizContent, InclusionPolicy, PromptText},
+        response_mode::{DraftFreeInput, DraftResponseMode, FreeInputAnswer},
+        source::Source,
+        tag::Tag,
+        usage_terms::UsageTerms,
+    };
+
+    fn user() -> UserId {
+        UserId::from_uuid(Uuid::now_v7())
+    }
 
     fn quiz_ids(count: usize) -> Vec<QuizId> {
         (0..count).map(|_| QuizId::new()).collect()
+    }
+
+    fn unpublished_quiz(owner: UserId, inclusion_policy: InclusionPolicy) -> Quiz {
+        let draft = DraftQuizContent::new(
+            Some(PromptText::parse("What is the capital of Japan?").unwrap()),
+            None,
+            Some(CanonicalAnswer::parse("Tokyo").unwrap()),
+            Some(DraftResponseMode::FreeInput(
+                DraftFreeInput::new(BTreeSet::from([FreeInputAnswer::parse("Tokyo").unwrap()]))
+                    .unwrap(),
+            )),
+            Language::Eng,
+            tags(0),
+            Source::User { author: owner },
+            UsageTerms::AllRightsReserved,
+        );
+        Quiz::new(owner, draft, inclusion_policy)
+    }
+
+    fn published_quiz(owner: UserId, inclusion_policy: InclusionPolicy) -> Quiz {
+        let mut quiz = unpublished_quiz(owner, inclusion_policy);
+        quiz.publish().unwrap();
+        quiz
+    }
+
+    /// A published quiz anyone may include.
+    fn quiz() -> Quiz {
+        published_quiz(user(), InclusionPolicy::Anyone)
+    }
+
+    fn quizzes(count: usize) -> Vec<Quiz> {
+        (0..count).map(|_| quiz()).collect()
+    }
+
+    fn ids(quizzes: &[Quiz]) -> Vec<QuizId> {
+        quizzes.iter().map(Quiz::id).collect()
     }
 
     fn entries(quiz_ids: Vec<QuizId>) -> Result<QuizListEntries, QuizListEntriesError> {
@@ -485,16 +550,16 @@ mod tests {
         .unwrap()
     }
 
-    fn new_quiz_list(quiz_ids: Vec<QuizId>, tags: TagSet) -> QuizList {
+    fn new_quiz_list(quizzes: &[Quiz], tags: TagSet) -> QuizList {
         let mut quiz_list = QuizList::new(
-            UserId::from_uuid(Uuid::now_v7()),
+            user(),
             QuizListTitle::parse("Capitals").unwrap(),
             None,
             Visibility::Private,
             tags,
         );
-        for quiz_id in quiz_ids {
-            quiz_list.add_quiz(quiz_id, None).unwrap();
+        for quiz in quizzes {
+            quiz_list.add_quiz(quiz, None).unwrap();
         }
         quiz_list
     }
@@ -646,24 +711,24 @@ mod tests {
 
     #[test]
     fn quiz_lists_are_equal_by_identifier() {
-        let quiz_list = new_quiz_list(Vec::new(), tags(0));
+        let quiz_list = new_quiz_list(&[], tags(0));
         let mut edited = quiz_list.clone();
         edited.change_title(QuizListTitle::parse("Renamed").unwrap());
 
         assert_eq!(quiz_list, edited);
-        assert_ne!(quiz_list, new_quiz_list(Vec::new(), tags(0)));
+        assert_ne!(quiz_list, new_quiz_list(&[], tags(0)));
     }
 
     #[test]
     fn starts_without_quizzes() {
-        let quiz_list = new_quiz_list(Vec::new(), tags(0));
+        let quiz_list = new_quiz_list(&[], tags(0));
 
         assert!(quiz_list.entries().quiz_ids().is_empty());
     }
 
     #[test]
     fn only_the_owner_may_edit() {
-        let quiz_list = new_quiz_list(Vec::new(), tags(0));
+        let quiz_list = new_quiz_list(&[], tags(0));
 
         assert!(quiz_list.is_editable_by(quiz_list.owner()));
         assert!(!quiz_list.is_editable_by(UserId::from_uuid(Uuid::now_v7())));
@@ -671,7 +736,7 @@ mod tests {
 
     #[test]
     fn changes_visibility() {
-        let mut quiz_list = new_quiz_list(Vec::new(), tags(0));
+        let mut quiz_list = new_quiz_list(&[], tags(0));
 
         quiz_list.change_visibility(Visibility::Public);
 
@@ -680,46 +745,49 @@ mod tests {
 
     #[test]
     fn appends_a_quiz() {
-        let ids = quiz_ids(2);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
+        let quizzes = quizzes(2);
+        let ids = ids(&quizzes);
+        let mut quiz_list = new_quiz_list(&quizzes, tags(0));
         let first_version = quiz_list.entries().id();
-        let quiz_id = QuizId::new();
+        let quiz = quiz();
 
-        quiz_list.add_quiz(quiz_id, None).unwrap();
+        quiz_list.add_quiz(&quiz, None).unwrap();
 
-        assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], ids[1], quiz_id]);
+        assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], ids[1], quiz.id()]);
         assert_ne!(quiz_list.entries().id(), first_version);
     }
 
     #[test]
     fn inserts_a_quiz_at_a_position() {
-        let ids = quiz_ids(2);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
-        let quiz_id = QuizId::new();
+        let quizzes = quizzes(2);
+        let ids = ids(&quizzes);
+        let mut quiz_list = new_quiz_list(&quizzes, tags(0));
+        let quiz = quiz();
 
-        quiz_list.add_quiz(quiz_id, Some(1)).unwrap();
+        quiz_list.add_quiz(&quiz, Some(1)).unwrap();
 
-        assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], quiz_id, ids[1]]);
+        assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], quiz.id(), ids[1]]);
     }
 
     #[test]
     fn inserts_a_quiz_at_the_end_position() {
-        let ids = quiz_ids(2);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
-        let quiz_id = QuizId::new();
+        let quizzes = quizzes(2);
+        let ids = ids(&quizzes);
+        let mut quiz_list = new_quiz_list(&quizzes, tags(0));
+        let quiz = quiz();
 
-        quiz_list.add_quiz(quiz_id, Some(2)).unwrap();
+        quiz_list.add_quiz(&quiz, Some(2)).unwrap();
 
-        assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], ids[1], quiz_id]);
+        assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], ids[1], quiz.id()]);
     }
 
     #[test]
     fn rejects_a_position_beyond_the_end() {
-        let mut quiz_list = new_quiz_list(quiz_ids(2), tags(0));
+        let mut quiz_list = new_quiz_list(&quizzes(2), tags(0));
         let before = quiz_list.clone();
 
         assert_eq!(
-            quiz_list.add_quiz(QuizId::new(), Some(3)),
+            quiz_list.add_quiz(&quiz(), Some(3)),
             Err(AddQuizError::PositionOutOfRange { position: 3 })
         );
         assert_eq!(quiz_list.entries().id(), before.entries().id());
@@ -727,12 +795,12 @@ mod tests {
 
     #[test]
     fn rejects_adding_a_quiz_twice() {
-        let ids = quiz_ids(2);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
+        let quizzes = quizzes(2);
+        let mut quiz_list = new_quiz_list(&quizzes, tags(0));
         let before = quiz_list.clone();
 
         assert_eq!(
-            quiz_list.add_quiz(ids[0], None),
+            quiz_list.add_quiz(&quizzes[0], None),
             Err(AddQuizError::DuplicateQuiz)
         );
         assert_eq!(quiz_list.entries().id(), before.entries().id());
@@ -740,20 +808,47 @@ mod tests {
 
     #[test]
     fn rejects_adding_beyond_the_limit() {
-        let mut quiz_list = new_quiz_list(quiz_ids(100), tags(0));
+        let mut quiz_list = new_quiz_list(&quizzes(100), tags(0));
         let before = quiz_list.clone();
 
         assert_eq!(
-            quiz_list.add_quiz(QuizId::new(), None),
+            quiz_list.add_quiz(&quiz(), None),
             Err(AddQuizError::TooManyQuizzes { count: 101 })
         );
         assert_eq!(quiz_list.entries().id(), before.entries().id());
     }
 
     #[test]
+    fn rejects_adding_an_unpublished_quiz() {
+        let mut quiz_list = new_quiz_list(&[], tags(0));
+        let quiz = unpublished_quiz(user(), InclusionPolicy::Anyone);
+
+        assert_eq!(
+            quiz_list.add_quiz(&quiz, None),
+            Err(AddQuizError::QuizUnpublished)
+        );
+    }
+
+    #[test]
+    fn inclusion_follows_the_quiz_policy() {
+        let mut quiz_list = new_quiz_list(&[], tags(0));
+        let own = published_quiz(quiz_list.owner(), InclusionPolicy::OwnerOnly);
+        let foreign = published_quiz(user(), InclusionPolicy::OwnerOnly);
+
+        quiz_list.add_quiz(&own, None).unwrap();
+
+        assert_eq!(
+            quiz_list.add_quiz(&foreign, None),
+            Err(AddQuizError::QuizNotIncludable)
+        );
+        assert_eq!(quiz_list.entries().quiz_ids(), [own.id()]);
+    }
+
+    #[test]
     fn removes_a_quiz() {
-        let ids = quiz_ids(3);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
+        let quizzes = quizzes(3);
+        let ids = ids(&quizzes);
+        let mut quiz_list = new_quiz_list(&quizzes, tags(0));
         let first_version = quiz_list.entries().id();
 
         quiz_list.remove_quiz(ids[1]).unwrap();
@@ -764,7 +859,7 @@ mod tests {
 
     #[test]
     fn rejects_removing_an_absent_quiz() {
-        let mut quiz_list = new_quiz_list(quiz_ids(2), tags(0));
+        let mut quiz_list = new_quiz_list(&quizzes(2), tags(0));
         let before = quiz_list.clone();
 
         assert_eq!(
@@ -776,8 +871,9 @@ mod tests {
 
     #[test]
     fn reorders_the_quizzes() {
-        let ids = quiz_ids(3);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
+        let quizzes = quizzes(3);
+        let ids = ids(&quizzes);
+        let mut quiz_list = new_quiz_list(&quizzes, tags(0));
         let first_version = quiz_list.entries().id();
 
         quiz_list.reorder(vec![ids[2], ids[0], ids[1]]).unwrap();
@@ -788,8 +884,9 @@ mod tests {
 
     #[test]
     fn rejects_an_order_that_is_not_a_permutation() {
-        let ids = quiz_ids(3);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
+        let quizzes = quizzes(3);
+        let ids = ids(&quizzes);
+        let mut quiz_list = new_quiz_list(&quizzes, tags(0));
         let before = quiz_list.clone();
 
         for order in [
