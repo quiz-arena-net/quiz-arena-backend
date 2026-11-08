@@ -245,13 +245,13 @@ pub(crate) enum Visibility {
 /// not delete its quizzes.
 ///
 /// Whether a quiz can be added is determined by
-/// [`Quiz::includable_by`](super::quiz::Quiz::includable_by). The same check
-/// runs again when a session builds its lineup. An inclusion that is no longer
-/// permitted stays in the list and is skipped.
+/// [`Quiz::is_includable_by`](super::quiz::Quiz::is_includable_by). The same
+/// check runs again when a session builds its lineup. An inclusion that is no
+/// longer permitted stays in the list and is skipped.
 ///
 /// The entries are versioned, see [`QuizListEntries`]. The title, description,
 /// visibility and tags are not. Edit permissions are checked by
-/// [`QuizList::editable_by`]. Two lists are equal when they have the same
+/// [`QuizList::is_editable_by`]. Two lists are equal when they have the same
 /// identifier.
 #[derive(Debug, Clone, Eq)]
 pub(crate) struct QuizList {
@@ -353,7 +353,7 @@ impl QuizList {
     /// Returns whether `user` may edit this quiz list.
     ///
     /// Only the owner may edit.
-    pub(crate) fn editable_by(&self, user: UserId) -> bool {
+    pub(crate) fn is_editable_by(&self, user: UserId) -> bool {
         user == self.owner
     }
 
@@ -651,8 +651,8 @@ mod tests {
     fn only_the_owner_may_edit() {
         let quiz_list = new_quiz_list(Vec::new(), tags(0));
 
-        assert!(quiz_list.editable_by(quiz_list.owner()));
-        assert!(!quiz_list.editable_by(UserId::from_uuid(Uuid::now_v7())));
+        assert!(quiz_list.is_editable_by(quiz_list.owner()));
+        assert!(!quiz_list.is_editable_by(UserId::from_uuid(Uuid::now_v7())));
     }
 
     #[test]

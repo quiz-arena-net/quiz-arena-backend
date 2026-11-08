@@ -495,7 +495,7 @@ pub(crate) enum QuizState {
 /// version. Statistics use the quiz ID regardless of version. The inclusion
 /// policy and the draft are not versioned.
 ///
-/// Whether a user may edit a quiz is answered by [`Quiz::editable_by`]. Two
+/// Whether a user may edit a quiz is answered by [`Quiz::is_editable_by`]. Two
 /// quizzes are equal when they have the same identifier.
 #[derive(Debug, Clone, Eq)]
 pub(crate) struct Quiz {
@@ -572,7 +572,7 @@ impl Quiz {
     ///
     /// Editing covers working on the draft, publishing, changing the inclusion
     /// policy and deleting the quiz. Only the owner may edit.
-    pub(crate) fn editable_by(&self, user: UserId) -> bool {
+    pub(crate) fn is_editable_by(&self, user: UserId) -> bool {
         user == self.owner
     }
 
@@ -580,7 +580,7 @@ impl Quiz {
     ///
     /// The owner always may. Anyone else may only under
     /// [`InclusionPolicy::Anyone`].
-    pub(crate) fn includable_by(&self, list_owner: UserId) -> bool {
+    pub(crate) fn is_includable_by(&self, list_owner: UserId) -> bool {
         list_owner == self.owner || self.inclusion_policy == InclusionPolicy::Anyone
     }
 
@@ -932,8 +932,8 @@ mod tests {
         let owner = user();
         let quiz = unpublished_quiz(owner);
 
-        assert!(quiz.editable_by(owner));
-        assert!(!quiz.editable_by(user()));
+        assert!(quiz.is_editable_by(owner));
+        assert!(!quiz.is_editable_by(user()));
     }
 
     #[test]
@@ -942,14 +942,14 @@ mod tests {
         let other = user();
         let mut quiz = unpublished_quiz(owner);
 
-        assert!(quiz.includable_by(owner));
-        assert!(!quiz.includable_by(other));
+        assert!(quiz.is_includable_by(owner));
+        assert!(!quiz.is_includable_by(other));
 
         quiz.change_inclusion_policy(InclusionPolicy::Anyone);
 
         assert_eq!(quiz.inclusion_policy(), InclusionPolicy::Anyone);
-        assert!(quiz.includable_by(owner));
-        assert!(quiz.includable_by(other));
+        assert!(quiz.is_includable_by(owner));
+        assert!(quiz.is_includable_by(other));
     }
 
     #[test]
