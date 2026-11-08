@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use isolang::Language;
 use mitsein::vec1::Vec1;
 use unicode_normalization::UnicodeNormalization;
@@ -9,7 +7,7 @@ use super::{
     media::Media,
     response_mode::{DraftResponseMode, ResponseMode, ResponseModeFromDraftError},
     source::Source,
-    tag::{Tag, TagSet, TagSetError},
+    tag::TagSet,
     usage_terms::UsageTerms,
     user::UserId,
 };
@@ -156,9 +154,9 @@ pub(crate) enum CanonicalAnswerParseError {
 
 /// A [`QuizContent`] that may still be incomplete.
 ///
-/// The question text, the canonical answer and the response mode may be
-/// missing, the response mode may be incomplete, and the tag limit is not
-/// enforced. Converting the draft into a [`QuizContent`] checks all of this.
+/// The question text, the canonical answer and the response mode may be missing
+/// and the response mode may be incomplete. Converting the draft into a
+/// [`QuizContent`] checks all of this.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DraftQuizContent {
     /// The question text.
@@ -177,7 +175,7 @@ pub(crate) struct DraftQuizContent {
     language: Language,
 
     /// Tags.
-    tags: BTreeSet<Tag>,
+    tags: TagSet,
 
     /// Where the quiz came from.
     source: Source,
@@ -193,7 +191,7 @@ impl DraftQuizContent {
         canonical_answer: Option<CanonicalAnswer>,
         response_mode: Option<DraftResponseMode>,
         language: Language,
-        tags: BTreeSet<Tag>,
+        tags: TagSet,
         source: Source,
         terms: UsageTerms,
     ) -> Self {
@@ -229,7 +227,7 @@ impl DraftQuizContent {
         self.language
     }
 
-    pub(crate) fn tags(&self) -> &BTreeSet<Tag> {
+    pub(crate) fn tags(&self) -> &TagSet {
         &self.tags
     }
 
@@ -412,13 +410,6 @@ impl TryFrom<DraftQuizContent> for QuizContent {
                 None
             }
         };
-        let tags = match TagSet::new(draft.tags) {
-            Ok(tags) => Some(tags),
-            Err(TagSetError::TooManyTags { count }) => {
-                errors.push(QuizContentFromDraftError::TooManyTags { count });
-                None
-            }
-        };
         if let Ok(errors) = Vec1::try_from(errors) {
             return Err(errors);
         }
@@ -431,13 +422,12 @@ impl TryFrom<DraftQuizContent> for QuizContent {
             .expect("a missing canonical answer was reported above");
         let response_mode =
             response_mode.expect("a missing or invalid response mode was reported above");
-        let tags = tags.expect("too many tags were reported above");
         Ok(Self::new(
             Prompt::new(prompt_text, draft.prompt_media),
             canonical_answer,
             response_mode,
             draft.language,
-            tags,
+            draft.tags,
             draft.source,
             draft.terms,
         ))
@@ -455,8 +445,6 @@ pub(crate) enum QuizContentFromDraftError {
     NoResponseMode,
     #[error("the response mode is not ready for publication")]
     ResponseModeNotReady(ResponseModeFromDraftError),
-    #[error("a quiz must have at most {} tags, got {count}", TagSet::MAX_TAGS)]
-    TooManyTags { count: usize },
 }
 
 /// Whose quiz lists may include a quiz.
@@ -671,6 +659,8 @@ pub(crate) enum PublishError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use mitsein::btree_set1::BTreeSet1;
 
     use super::*;
@@ -680,6 +670,7 @@ mod tests {
         media::{MediaId, MediaKind},
         response_mode::{DraftFreeInput, FreeInput, FreeInputAnswer, FreeInputFromDraftError},
         source::SourceCredit,
+        tag::Tag,
         usage_terms::{CreativeCommons, CreativeCommonsVersion},
         web_url::WebUrl,
     };
@@ -694,15 +685,19 @@ mod tests {
     }
 
     fn draft_free_input() -> DraftResponseMode {
-        DraftResponseMode::FreeInput(DraftFreeInput::new(BTreeSet::from([
-            FreeInputAnswer::parse("Tokyo").unwrap(),
-        ])))
+        DraftResponseMode::FreeInput(
+            DraftFreeInput::new(BTreeSet::from([FreeInputAnswer::parse("Tokyo").unwrap()]))
+                .unwrap(),
+        )
     }
 
-    fn tags(count: usize) -> BTreeSet<Tag> {
-        (0..count)
-            .map(|index| Tag::parse(format!("tag{index}")).unwrap())
-            .collect()
+    fn tags(count: usize) -> TagSet {
+        TagSet::new(
+            (0..count)
+                .map(|index| Tag::parse(format!("tag{index}")).unwrap())
+                .collect(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -803,7 +798,7 @@ mod tests {
         prompt_text: Option<&str>,
         canonical_answer: Option<&str>,
         response_mode: Option<DraftResponseMode>,
-        tags: BTreeSet<Tag>,
+        tags: TagSet,
     ) -> DraftQuizContent {
         DraftQuizContent::new(
             prompt_text.map(|text| PromptText::parse(text).unwrap()),
@@ -882,14 +877,14 @@ mod tests {
         assert_eq!(content.canonical_answer().as_str(), "Tokyo");
         assert_eq!(content.response_mode(), &free_input());
         assert_eq!(content.language(), Language::Jpn);
-        assert_eq!(content.tags().as_set(), &tags(1));
+        assert_eq!(content.tags(), &tags(1));
         assert_eq!(content.source(), &source);
         assert_eq!(content.terms(), &terms);
     }
 
     #[test]
     fn reports_every_violation_of_a_draft() {
-        let draft = new_draft(None, None, None, tags(11));
+        let draft = new_draft(None, None, None, tags(0));
 
         assert_eq!(
             QuizContent::try_from(draft),
@@ -898,7 +893,6 @@ mod tests {
                 [
                     QuizContentFromDraftError::NoCanonicalAnswer,
                     QuizContentFromDraftError::NoResponseMode,
-                    QuizContentFromDraftError::TooManyTags { count: 11 },
                 ]
             ))
         );
@@ -906,7 +900,8 @@ mod tests {
 
     #[test]
     fn reports_an_invalid_response_mode_of_a_draft() {
-        let free_input = DraftResponseMode::FreeInput(DraftFreeInput::new(BTreeSet::new()));
+        let free_input =
+            DraftResponseMode::FreeInput(DraftFreeInput::new(BTreeSet::new()).unwrap());
         let draft = new_draft(Some("Q"), Some("A"), Some(free_input), tags(0));
 
         assert_eq!(

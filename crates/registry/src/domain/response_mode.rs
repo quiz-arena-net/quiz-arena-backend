@@ -58,7 +58,7 @@ pub(crate) enum FreeInputAnswerParseError {
 
 /// A [`FreeInput`] that may still be incomplete.
 ///
-/// The expected answers may be empty and their limit is not enforced.
+/// The expected answers may be empty. Guaranteed to hold at most 20 of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DraftFreeInput {
     /// Reference answers for judging.
@@ -66,13 +66,28 @@ pub(crate) struct DraftFreeInput {
 }
 
 impl DraftFreeInput {
-    pub(crate) fn new(expected_answers: BTreeSet<FreeInputAnswer>) -> Self {
-        Self { expected_answers }
+    pub(crate) fn new(
+        expected_answers: BTreeSet<FreeInputAnswer>,
+    ) -> Result<Self, DraftFreeInputError> {
+        let count = expected_answers.len();
+        if count > FreeInput::MAX_EXPECTED_ANSWERS {
+            return Err(DraftFreeInputError::TooManyExpectedAnswers { count });
+        }
+        Ok(Self { expected_answers })
     }
 
     pub(crate) fn expected_answers(&self) -> &BTreeSet<FreeInputAnswer> {
         &self.expected_answers
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum DraftFreeInputError {
+    #[error(
+        "a free input must have at most {} expected answers, got {count}",
+        FreeInput::MAX_EXPECTED_ANSWERS
+    )]
+    TooManyExpectedAnswers { count: usize },
 }
 
 /// The player provides an unrestricted textual response.
@@ -104,23 +119,6 @@ impl FreeInput {
     }
 }
 
-impl TryFrom<DraftFreeInput> for FreeInput {
-    type Error = FreeInputFromDraftError;
-
-    fn try_from(draft: DraftFreeInput) -> Result<Self, Self::Error> {
-        let expected_answers = match BTreeSet1::try_from(draft.expected_answers) {
-            Ok(expected_answers) => expected_answers,
-            Err(_) => return Err(FreeInputFromDraftError::NoExpectedAnswer),
-        };
-        match Self::new(expected_answers) {
-            Ok(free_input) => Ok(free_input),
-            Err(FreeInputError::TooManyExpectedAnswers { count }) => {
-                Err(FreeInputFromDraftError::TooManyExpectedAnswers { count })
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum FreeInputError {
     #[error(
@@ -130,15 +128,23 @@ pub(crate) enum FreeInputError {
     TooManyExpectedAnswers { count: usize },
 }
 
+impl TryFrom<DraftFreeInput> for FreeInput {
+    type Error = FreeInputFromDraftError;
+
+    fn try_from(draft: DraftFreeInput) -> Result<Self, Self::Error> {
+        let expected_answers = match BTreeSet1::try_from(draft.expected_answers) {
+            Ok(expected_answers) => expected_answers,
+            Err(_) => return Err(FreeInputFromDraftError::NoExpectedAnswer),
+        };
+        // The draft already enforced the limit.
+        Ok(Self { expected_answers })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum FreeInputFromDraftError {
     #[error("a free input must have at least one expected answer")]
     NoExpectedAnswer,
-    #[error(
-        "a free input must have at most {} expected answers, got {count}",
-        FreeInput::MAX_EXPECTED_ANSWERS
-    )]
-    TooManyExpectedAnswers { count: usize },
 }
 
 /// Specifies how many correct choices a player must select in a [`TextChoice`]
@@ -200,8 +206,8 @@ pub(crate) enum TextChoiceAnswerParseError {
 
 /// A [`TextChoice`] that may still be incomplete.
 ///
-/// The correct answers may be empty, an answer may be both correct and wrong,
-/// and the answer limit is not enforced.
+/// The correct answers may be empty and an answer may be both correct and
+/// wrong. Guaranteed to hold at most 6 answers across both sets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DraftTextChoice {
     /// Determines whether one or all correct answers must be selected.
@@ -219,12 +225,16 @@ impl DraftTextChoice {
         choice_requirement: ChoiceRequirement,
         correct_answers: BTreeSet<TextChoiceAnswer>,
         wrong_answers: BTreeSet<TextChoiceAnswer>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, DraftTextChoiceError> {
+        let count = correct_answers.len() + wrong_answers.len();
+        if count > TextChoice::MAX_ANSWERS {
+            return Err(DraftTextChoiceError::TooManyAnswers { count });
+        }
+        Ok(Self {
             choice_requirement,
             correct_answers,
             wrong_answers,
-        }
+        })
     }
 
     pub(crate) fn choice_requirement(&self) -> ChoiceRequirement {
@@ -238,6 +248,15 @@ impl DraftTextChoice {
     pub(crate) fn wrong_answers(&self) -> &BTreeSet<TextChoiceAnswer> {
         &self.wrong_answers
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum DraftTextChoiceError {
+    #[error(
+        "a text choice must have at most {} answers, got {count}",
+        TextChoice::MAX_ANSWERS
+    )]
+    TooManyAnswers { count: usize },
 }
 
 /// The player selects from a collection of predefined text answers.
@@ -294,30 +313,6 @@ impl TextChoice {
     }
 }
 
-impl TryFrom<DraftTextChoice> for TextChoice {
-    type Error = TextChoiceFromDraftError;
-
-    fn try_from(draft: DraftTextChoice) -> Result<Self, Self::Error> {
-        let correct_answers = match BTreeSet1::try_from(draft.correct_answers) {
-            Ok(correct_answers) => correct_answers,
-            Err(_) => return Err(TextChoiceFromDraftError::NoCorrectAnswer),
-        };
-        match Self::new(
-            draft.choice_requirement,
-            correct_answers,
-            draft.wrong_answers,
-        ) {
-            Ok(text_choice) => Ok(text_choice),
-            Err(TextChoiceError::AnswerBothCorrectAndWrong) => {
-                Err(TextChoiceFromDraftError::AnswerBothCorrectAndWrong)
-            }
-            Err(TextChoiceError::TooManyAnswers { count }) => {
-                Err(TextChoiceFromDraftError::TooManyAnswers { count })
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum TextChoiceError {
     #[error("an answer must not be both correct and wrong")]
@@ -329,17 +324,32 @@ pub(crate) enum TextChoiceError {
     TooManyAnswers { count: usize },
 }
 
+impl TryFrom<DraftTextChoice> for TextChoice {
+    type Error = TextChoiceFromDraftError;
+
+    fn try_from(draft: DraftTextChoice) -> Result<Self, Self::Error> {
+        let correct_answers = match BTreeSet1::try_from(draft.correct_answers) {
+            Ok(correct_answers) => correct_answers,
+            Err(_) => return Err(TextChoiceFromDraftError::NoCorrectAnswer),
+        };
+        if !correct_answers.is_disjoint(&draft.wrong_answers) {
+            return Err(TextChoiceFromDraftError::AnswerBothCorrectAndWrong);
+        }
+        // The draft already enforced the limit.
+        Ok(Self {
+            choice_requirement: draft.choice_requirement,
+            correct_answers,
+            wrong_answers: draft.wrong_answers,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum TextChoiceFromDraftError {
     #[error("a text choice must have at least one correct answer")]
     NoCorrectAnswer,
     #[error("an answer must not be both correct and wrong")]
     AnswerBothCorrectAndWrong,
-    #[error(
-        "a text choice must have at most {} answers, got {count}",
-        TextChoice::MAX_ANSWERS
-    )]
-    TooManyAnswers { count: usize },
 }
 
 /// Text shown alongside the image of an [`ImageChoiceAnswer`].
@@ -429,8 +439,8 @@ pub(crate) enum ImageChoiceAnswerError {
 
 /// An [`ImageChoice`] that may still be incomplete.
 ///
-/// The correct answers may be empty, an image may appear twice, and the answer
-/// limit is not enforced.
+/// The correct answers may be empty and an image may appear twice. Guaranteed
+/// to hold at most 4 answers across both sets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DraftImageChoice {
     /// Determines whether one or all correct answers must be selected.
@@ -448,12 +458,16 @@ impl DraftImageChoice {
         choice_requirement: ChoiceRequirement,
         correct_answers: BTreeSet<ImageChoiceAnswer>,
         wrong_answers: BTreeSet<ImageChoiceAnswer>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, DraftImageChoiceError> {
+        let count = correct_answers.len() + wrong_answers.len();
+        if count > ImageChoice::MAX_ANSWERS {
+            return Err(DraftImageChoiceError::TooManyAnswers { count });
+        }
+        Ok(Self {
             choice_requirement,
             correct_answers,
             wrong_answers,
-        }
+        })
     }
 
     pub(crate) fn choice_requirement(&self) -> ChoiceRequirement {
@@ -467,6 +481,15 @@ impl DraftImageChoice {
     pub(crate) fn wrong_answers(&self) -> &BTreeSet<ImageChoiceAnswer> {
         &self.wrong_answers
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum DraftImageChoiceError {
+    #[error(
+        "an image choice must have at most {} answers, got {count}",
+        ImageChoice::MAX_ANSWERS
+    )]
+    TooManyAnswers { count: usize },
 }
 
 /// The player selects from a collection of predefined image answers.
@@ -492,18 +515,26 @@ pub(crate) struct ImageChoice {
 impl ImageChoice {
     pub(crate) const MAX_ANSWERS: usize = 4;
 
+    fn has_duplicate_image(
+        correct_answers: &BTreeSet<ImageChoiceAnswer>,
+        wrong_answers: &BTreeSet<ImageChoiceAnswer>,
+    ) -> bool {
+        let mut images = BTreeSet::new();
+        correct_answers
+            .iter()
+            .chain(wrong_answers)
+            .any(|answer| !images.insert(answer.image.id()))
+    }
+
     pub(crate) fn new(
         choice_requirement: ChoiceRequirement,
         correct_answers: BTreeSet1<ImageChoiceAnswer>,
         wrong_answers: BTreeSet<ImageChoiceAnswer>,
     ) -> Result<Self, ImageChoiceError> {
-        let mut images = BTreeSet::new();
-        for answer in wrong_answers.iter().chain(correct_answers.as_btree_set()) {
-            if !images.insert(answer.image.id()) {
-                return Err(ImageChoiceError::DuplicateImage);
-            }
+        if Self::has_duplicate_image(correct_answers.as_btree_set(), &wrong_answers) {
+            return Err(ImageChoiceError::DuplicateImage);
         }
-        let count = images.len();
+        let count = correct_answers.len().get() + wrong_answers.len();
         if count > Self::MAX_ANSWERS {
             return Err(ImageChoiceError::TooManyAnswers { count });
         }
@@ -527,28 +558,6 @@ impl ImageChoice {
     }
 }
 
-impl TryFrom<DraftImageChoice> for ImageChoice {
-    type Error = ImageChoiceFromDraftError;
-
-    fn try_from(draft: DraftImageChoice) -> Result<Self, Self::Error> {
-        let correct_answers = match BTreeSet1::try_from(draft.correct_answers) {
-            Ok(correct_answers) => correct_answers,
-            Err(_) => return Err(ImageChoiceFromDraftError::NoCorrectAnswer),
-        };
-        match Self::new(
-            draft.choice_requirement,
-            correct_answers,
-            draft.wrong_answers,
-        ) {
-            Ok(image_choice) => Ok(image_choice),
-            Err(ImageChoiceError::DuplicateImage) => Err(ImageChoiceFromDraftError::DuplicateImage),
-            Err(ImageChoiceError::TooManyAnswers { count }) => {
-                Err(ImageChoiceFromDraftError::TooManyAnswers { count })
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum ImageChoiceError {
     #[error("an image must not appear in more than one answer")]
@@ -560,17 +569,32 @@ pub(crate) enum ImageChoiceError {
     TooManyAnswers { count: usize },
 }
 
+impl TryFrom<DraftImageChoice> for ImageChoice {
+    type Error = ImageChoiceFromDraftError;
+
+    fn try_from(draft: DraftImageChoice) -> Result<Self, Self::Error> {
+        let correct_answers = match BTreeSet1::try_from(draft.correct_answers) {
+            Ok(correct_answers) => correct_answers,
+            Err(_) => return Err(ImageChoiceFromDraftError::NoCorrectAnswer),
+        };
+        if Self::has_duplicate_image(correct_answers.as_btree_set(), &draft.wrong_answers) {
+            return Err(ImageChoiceFromDraftError::DuplicateImage);
+        }
+        // The draft already enforced the limit.
+        Ok(Self {
+            choice_requirement: draft.choice_requirement,
+            correct_answers,
+            wrong_answers: draft.wrong_answers,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum ImageChoiceFromDraftError {
     #[error("an image choice must have at least one correct answer")]
     NoCorrectAnswer,
     #[error("an image must not appear in more than one answer")]
     DuplicateImage,
-    #[error(
-        "an image choice must have at most {} answers, got {count}",
-        ImageChoice::MAX_ANSWERS
-    )]
-    TooManyAnswers { count: usize },
 }
 
 /// A single character used in a character-by-character response.
@@ -607,9 +631,9 @@ pub(crate) enum CharacterError {
 
 /// A [`CharacterChoice`] that may still be incomplete.
 ///
-/// The correct choice may be missing, the wrong choices may be empty, the
-/// correct choice may also appear among the wrong ones, and the limit on wrong
-/// choices is not enforced.
+/// The correct choice may be missing, the wrong choices may be empty, and the
+/// correct choice may also appear among the wrong ones. Guaranteed to hold at
+/// most 9 wrong choices.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DraftCharacterChoice {
     /// The correct character for this position.
@@ -623,11 +647,15 @@ impl DraftCharacterChoice {
     pub(crate) fn new(
         correct_choice: Option<Character>,
         wrong_choices: BTreeSet<Character>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, DraftCharacterChoiceError> {
+        let count = wrong_choices.len();
+        if count > CharacterChoice::MAX_WRONG_CHOICES {
+            return Err(DraftCharacterChoiceError::TooManyWrongChoices { count });
+        }
+        Ok(Self {
             correct_choice,
             wrong_choices,
-        }
+        })
     }
 
     pub(crate) fn correct_choice(&self) -> Option<Character> {
@@ -637,6 +665,15 @@ impl DraftCharacterChoice {
     pub(crate) fn wrong_choices(&self) -> &BTreeSet<Character> {
         &self.wrong_choices
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum DraftCharacterChoiceError {
+    #[error(
+        "a character choice must have at most {} wrong choices, got {count}",
+        CharacterChoice::MAX_WRONG_CHOICES
+    )]
+    TooManyWrongChoices { count: usize },
 }
 
 /// The choices presented for one position in a character-by-character response.
@@ -682,29 +719,6 @@ impl CharacterChoice {
     }
 }
 
-impl TryFrom<DraftCharacterChoice> for CharacterChoice {
-    type Error = CharacterChoiceFromDraftError;
-
-    fn try_from(draft: DraftCharacterChoice) -> Result<Self, Self::Error> {
-        let Some(correct_choice) = draft.correct_choice else {
-            return Err(CharacterChoiceFromDraftError::NoCorrectChoice);
-        };
-        let wrong_choices = match BTreeSet1::try_from(draft.wrong_choices) {
-            Ok(wrong_choices) => wrong_choices,
-            Err(_) => return Err(CharacterChoiceFromDraftError::NoWrongChoice),
-        };
-        match Self::new(correct_choice, wrong_choices) {
-            Ok(choice) => Ok(choice),
-            Err(CharacterChoiceError::CorrectChoiceAmongWrongChoices) => {
-                Err(CharacterChoiceFromDraftError::CorrectChoiceAmongWrongChoices)
-            }
-            Err(CharacterChoiceError::TooManyWrongChoices { count }) => {
-                Err(CharacterChoiceFromDraftError::TooManyWrongChoices { count })
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum CharacterChoiceError {
     #[error("the correct character must not also be a wrong choice")]
@@ -716,6 +730,28 @@ pub(crate) enum CharacterChoiceError {
     TooManyWrongChoices { count: usize },
 }
 
+impl TryFrom<DraftCharacterChoice> for CharacterChoice {
+    type Error = CharacterChoiceFromDraftError;
+
+    fn try_from(draft: DraftCharacterChoice) -> Result<Self, Self::Error> {
+        let Some(correct_choice) = draft.correct_choice else {
+            return Err(CharacterChoiceFromDraftError::NoCorrectChoice);
+        };
+        let wrong_choices = match BTreeSet1::try_from(draft.wrong_choices) {
+            Ok(wrong_choices) => wrong_choices,
+            Err(_) => return Err(CharacterChoiceFromDraftError::NoWrongChoice),
+        };
+        if wrong_choices.contains(&correct_choice) {
+            return Err(CharacterChoiceFromDraftError::CorrectChoiceAmongWrongChoices);
+        }
+        // The draft already enforced the limit.
+        Ok(Self {
+            correct_choice,
+            wrong_choices,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum CharacterChoiceFromDraftError {
     #[error("a character choice must have a correct choice")]
@@ -724,16 +760,11 @@ pub(crate) enum CharacterChoiceFromDraftError {
     NoWrongChoice,
     #[error("the correct character must not also be a wrong choice")]
     CorrectChoiceAmongWrongChoices,
-    #[error(
-        "a character choice must have at most {} wrong choices, got {count}",
-        CharacterChoice::MAX_WRONG_CHOICES
-    )]
-    TooManyWrongChoices { count: usize },
 }
 
 /// A [`CharacterChoices`] that may still be incomplete.
 ///
-/// The positions may be empty and their limit is not enforced.
+/// The positions may be empty. Guaranteed to hold at most 50 of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DraftCharacterChoices {
     /// The choices for each position.
@@ -741,13 +772,28 @@ pub(crate) struct DraftCharacterChoices {
 }
 
 impl DraftCharacterChoices {
-    pub(crate) fn new(choices: Vec<DraftCharacterChoice>) -> Self {
-        Self { choices }
+    pub(crate) fn new(
+        choices: Vec<DraftCharacterChoice>,
+    ) -> Result<Self, DraftCharacterChoicesError> {
+        let count = choices.len();
+        if count > CharacterChoices::MAX_POSITIONS {
+            return Err(DraftCharacterChoicesError::TooManyCharacterChoices { count });
+        }
+        Ok(Self { choices })
     }
 
     pub(crate) fn choices(&self) -> &[DraftCharacterChoice] {
         &self.choices
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum DraftCharacterChoicesError {
+    #[error(
+        "character choices must have at most {} positions, got {count}",
+        CharacterChoices::MAX_POSITIONS
+    )]
+    TooManyCharacterChoices { count: usize },
 }
 
 /// The player constructs the answer one character at a time by selecting from a
@@ -779,6 +825,15 @@ impl CharacterChoices {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum CharacterChoicesError {
+    #[error(
+        "character choices must have at most {} positions, got {count}",
+        CharacterChoices::MAX_POSITIONS
+    )]
+    TooManyCharacterChoices { count: usize },
+}
+
 impl TryFrom<DraftCharacterChoices> for CharacterChoices {
     type Error = CharacterChoicesFromDraftError;
 
@@ -800,22 +855,9 @@ impl TryFrom<DraftCharacterChoices> for CharacterChoices {
             Ok(choices) => choices,
             Err(_) => return Err(CharacterChoicesFromDraftError::NoCharacterChoice),
         };
-        match Self::new(choices) {
-            Ok(choices) => Ok(choices),
-            Err(CharacterChoicesError::TooManyCharacterChoices { count }) => {
-                Err(CharacterChoicesFromDraftError::TooManyCharacterChoices { count })
-            }
-        }
+        // The draft already enforced the limit.
+        Ok(Self { choices })
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum CharacterChoicesError {
-    #[error(
-        "character choices must have at most {} positions, got {count}",
-        CharacterChoices::MAX_POSITIONS
-    )]
-    TooManyCharacterChoices { count: usize },
 }
 
 /// Positions are zero-based indexes into [`DraftCharacterChoices::choices`].
@@ -828,11 +870,6 @@ pub(crate) enum CharacterChoicesFromDraftError {
         position: usize,
         error: CharacterChoiceFromDraftError,
     },
-    #[error(
-        "character choices must have at most {} positions, got {count}",
-        CharacterChoices::MAX_POSITIONS
-    )]
-    TooManyCharacterChoices { count: usize },
 }
 
 /// A [`ResponseMode`] that may still be incomplete.
@@ -1061,6 +1098,20 @@ mod tests {
             free_input(21),
             Err(FreeInputError::TooManyExpectedAnswers { count: 21 })
         );
+
+        let draft = |count: usize| {
+            DraftFreeInput::new(
+                (0..count)
+                    .map(|index| FreeInputAnswer::parse(format!("answer{index}")).unwrap())
+                    .collect(),
+            )
+        };
+
+        assert!(draft(20).is_ok());
+        assert_eq!(
+            draft(21),
+            Err(DraftFreeInputError::TooManyExpectedAnswers { count: 21 })
+        );
     }
 
     #[test]
@@ -1080,6 +1131,21 @@ mod tests {
             choice(10),
             Err(CharacterChoiceError::TooManyWrongChoices { count: 10 })
         );
+
+        let draft = |count: usize| {
+            DraftCharacterChoice::new(
+                None,
+                (0..count)
+                    .map(|index| character(char::from(b'b' + index as u8)))
+                    .collect(),
+            )
+        };
+
+        assert!(draft(9).is_ok());
+        assert_eq!(
+            draft(10),
+            Err(DraftCharacterChoiceError::TooManyWrongChoices { count: 10 })
+        );
     }
 
     #[test]
@@ -1097,6 +1163,20 @@ mod tests {
         assert_eq!(
             choices(51),
             Err(CharacterChoicesError::TooManyCharacterChoices { count: 51 })
+        );
+
+        let draft = |count: usize| {
+            DraftCharacterChoices::new(
+                (0..count)
+                    .map(|_| DraftCharacterChoice::new(None, BTreeSet::new()).unwrap())
+                    .collect(),
+            )
+        };
+
+        assert!(draft(50).is_ok());
+        assert_eq!(
+            draft(51),
+            Err(DraftCharacterChoicesError::TooManyCharacterChoices { count: 51 })
         );
     }
 
@@ -1143,6 +1223,22 @@ mod tests {
             text_choice(6),
             Err(TextChoiceError::TooManyAnswers { count: 7 })
         );
+
+        let draft = |wrong_count: usize| {
+            DraftTextChoice::new(
+                ChoiceRequirement::One,
+                BTreeSet::new(),
+                (0..wrong_count)
+                    .map(|index| TextChoiceAnswer::parse(format!("wrong{index}")).unwrap())
+                    .collect(),
+            )
+        };
+
+        assert!(draft(6).is_ok());
+        assert_eq!(
+            draft(7),
+            Err(DraftTextChoiceError::TooManyAnswers { count: 7 })
+        );
     }
 
     fn media(kind: MediaKind) -> Media {
@@ -1179,6 +1275,20 @@ mod tests {
             image_choice(4),
             Err(ImageChoiceError::TooManyAnswers { count: 5 })
         );
+
+        let draft = |wrong_count: usize| {
+            DraftImageChoice::new(
+                ChoiceRequirement::One,
+                BTreeSet::new(),
+                (0..wrong_count).map(|_| image_answer()).collect(),
+            )
+        };
+
+        assert!(draft(4).is_ok());
+        assert_eq!(
+            draft(5),
+            Err(DraftImageChoiceError::TooManyAnswers { count: 5 })
+        );
     }
 
     #[test]
@@ -1209,8 +1319,9 @@ mod tests {
     #[test]
     fn converts_a_complete_draft_response_mode() {
         let tokyo = FreeInputAnswer::parse("Tokyo").unwrap();
-        let draft =
-            DraftResponseMode::FreeInput(DraftFreeInput::new(BTreeSet::from([tokyo.clone()])));
+        let draft = DraftResponseMode::FreeInput(
+            DraftFreeInput::new(BTreeSet::from([tokyo.clone()])).unwrap(),
+        );
 
         assert_eq!(
             ResponseMode::try_from(draft),
@@ -1222,7 +1333,7 @@ mod tests {
 
     #[test]
     fn rejects_a_draft_free_input_without_expected_answers() {
-        let draft = DraftResponseMode::FreeInput(DraftFreeInput::new(BTreeSet::new()));
+        let draft = DraftResponseMode::FreeInput(DraftFreeInput::new(BTreeSet::new()).unwrap());
 
         assert_eq!(
             ResponseMode::try_from(draft),
@@ -1234,16 +1345,18 @@ mod tests {
 
     #[test]
     fn rejects_a_draft_choice_without_correct_answers() {
-        let text_choice = DraftResponseMode::TextChoice(DraftTextChoice::new(
-            ChoiceRequirement::One,
-            BTreeSet::new(),
-            BTreeSet::from([TextChoiceAnswer::parse("Kyoto").unwrap()]),
-        ));
-        let image_choice = DraftResponseMode::ImageChoice(DraftImageChoice::new(
-            ChoiceRequirement::One,
-            BTreeSet::new(),
-            BTreeSet::new(),
-        ));
+        let text_choice = DraftResponseMode::TextChoice(
+            DraftTextChoice::new(
+                ChoiceRequirement::One,
+                BTreeSet::new(),
+                BTreeSet::from([TextChoiceAnswer::parse("Kyoto").unwrap()]),
+            )
+            .unwrap(),
+        );
+        let image_choice = DraftResponseMode::ImageChoice(
+            DraftImageChoice::new(ChoiceRequirement::One, BTreeSet::new(), BTreeSet::new())
+                .unwrap(),
+        );
 
         assert_eq!(
             ResponseMode::try_from(text_choice),
@@ -1266,7 +1379,8 @@ mod tests {
             ChoiceRequirement::All,
             BTreeSet::from([tokyo.clone()]),
             BTreeSet::from([tokyo]),
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             TextChoice::try_from(draft),
@@ -1276,7 +1390,7 @@ mod tests {
 
     #[test]
     fn rejects_draft_character_choices_without_positions() {
-        let draft = DraftCharacterChoices::new(Vec::new());
+        let draft = DraftCharacterChoices::new(Vec::new()).unwrap();
 
         assert_eq!(
             CharacterChoices::try_from(draft),
@@ -1287,12 +1401,14 @@ mod tests {
     #[test]
     fn rejects_the_first_invalid_position_of_draft_character_choices() {
         let complete =
-            DraftCharacterChoice::new(Some(character('a')), BTreeSet::from([character('b')]));
+            DraftCharacterChoice::new(Some(character('a')), BTreeSet::from([character('b')]))
+                .unwrap();
         let draft = DraftCharacterChoices::new(vec![
             complete,
-            DraftCharacterChoice::new(Some(character('a')), BTreeSet::new()),
-            DraftCharacterChoice::new(None, BTreeSet::new()),
-        ]);
+            DraftCharacterChoice::new(Some(character('a')), BTreeSet::new()).unwrap(),
+            DraftCharacterChoice::new(None, BTreeSet::new()).unwrap(),
+        ])
+        .unwrap();
 
         assert_eq!(
             CharacterChoices::try_from(draft),
@@ -1305,7 +1421,7 @@ mod tests {
 
     #[test]
     fn reports_a_missing_correct_choice_before_missing_wrong_ones() {
-        let draft = DraftCharacterChoice::new(None, BTreeSet::new());
+        let draft = DraftCharacterChoice::new(None, BTreeSet::new()).unwrap();
 
         assert_eq!(
             CharacterChoice::try_from(draft),
