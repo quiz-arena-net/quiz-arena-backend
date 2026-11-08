@@ -419,12 +419,12 @@ pub(crate) enum QuizContentFromDraftError {
 ///
 /// Sessions pose quizzes through quiz lists. This policy governs who may
 /// redistribute the quiz through their own lists, not who may play it. A quiz
-/// in a public list owned by its author can be played by anyone who can reach
+/// in a public list owned by its owner can be played by anyone who can reach
 /// that list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum InclusionPolicy {
-    /// Only lists owned by the author.
-    AuthorOnly,
+    /// Only lists owned by the owner.
+    OwnerOnly,
 
     /// Lists owned by anyone.
     Anyone,
@@ -453,7 +453,7 @@ pub(crate) enum QuizState {
     },
 }
 
-/// A quiz authored by a user.
+/// A quiz owned by a user.
 ///
 /// A quiz may be unpublished or published, see [`QuizState`]. It keeps its
 /// identity across revisions. Each publication replaces the content with a new
@@ -467,8 +467,8 @@ pub(crate) struct Quiz {
     /// The unique identifier of this quiz.
     id: QuizId,
 
-    /// The author who created this quiz.
-    author: UserId,
+    /// The user who owns this quiz.
+    owner: UserId,
 
     /// Whose quiz lists may include this quiz.
     ///
@@ -483,13 +483,13 @@ pub(crate) struct Quiz {
 impl Quiz {
     /// Starts a new, unpublished quiz with a freshly generated identifier.
     pub(crate) fn new(
-        author: UserId,
+        owner: UserId,
         draft: DraftQuizContent,
         inclusion_policy: InclusionPolicy,
     ) -> Self {
         Self {
             id: QuizId::new(),
-            author,
+            owner,
             inclusion_policy,
             state: QuizState::Unpublished { draft },
         }
@@ -501,13 +501,13 @@ impl Quiz {
     /// carried by [`QuizContent`] and [`QuizState`], so this cannot fail.
     pub(crate) fn reconstitute(
         id: QuizId,
-        author: UserId,
+        owner: UserId,
         inclusion_policy: InclusionPolicy,
         state: QuizState,
     ) -> Self {
         Self {
             id,
-            author,
+            owner,
             inclusion_policy,
             state,
         }
@@ -517,8 +517,8 @@ impl Quiz {
         self.id
     }
 
-    pub(crate) fn author(&self) -> UserId {
-        self.author
+    pub(crate) fn owner(&self) -> UserId {
+        self.owner
     }
 
     pub(crate) fn inclusion_policy(&self) -> InclusionPolicy {
@@ -532,17 +532,17 @@ impl Quiz {
     /// Returns whether `user` may edit this quiz.
     ///
     /// Editing covers working on the draft, publishing, changing the inclusion
-    /// policy and deleting the quiz. Only the author may edit.
+    /// policy and deleting the quiz. Only the owner may edit.
     pub(crate) fn editable_by(&self, user: UserId) -> bool {
-        user == self.author
+        user == self.owner
     }
 
     /// Returns whether a quiz list owned by `list_owner` may include this quiz.
     ///
-    /// The author always may. Anyone else may only under
+    /// The owner always may. Anyone else may only under
     /// [`InclusionPolicy::Anyone`].
     pub(crate) fn includable_by(&self, list_owner: UserId) -> bool {
-        list_owner == self.author || self.inclusion_policy == InclusionPolicy::Anyone
+        list_owner == self.owner || self.inclusion_policy == InclusionPolicy::Anyone
     }
 
     /// Replaces the draft. Starts one if the quiz has none.
@@ -767,12 +767,12 @@ mod tests {
         )
     }
 
-    fn unpublished_quiz(author: UserId) -> Quiz {
-        Quiz::new(author, complete_draft(), InclusionPolicy::AuthorOnly)
+    fn unpublished_quiz(owner: UserId) -> Quiz {
+        Quiz::new(owner, complete_draft(), InclusionPolicy::OwnerOnly)
     }
 
-    fn published_quiz(author: UserId) -> Quiz {
-        let mut quiz = unpublished_quiz(author);
+    fn published_quiz(owner: UserId) -> Quiz {
+        let mut quiz = unpublished_quiz(owner);
         quiz.publish().unwrap();
         quiz
     }
@@ -843,37 +843,37 @@ mod tests {
 
     #[test]
     fn quizzes_are_equal_by_identifier() {
-        let author = user();
-        let quiz = unpublished_quiz(author);
+        let owner = user();
+        let quiz = unpublished_quiz(owner);
         let mut edited = quiz.clone();
         edited.edit_draft(new_draft(Some("Q"), Some("A"), None, tags(0)));
 
         assert_eq!(quiz, edited);
-        assert_ne!(quiz, unpublished_quiz(author));
+        assert_ne!(quiz, unpublished_quiz(owner));
     }
 
     #[test]
-    fn only_the_author_may_edit() {
-        let author = user();
-        let quiz = unpublished_quiz(author);
+    fn only_the_owner_may_edit() {
+        let owner = user();
+        let quiz = unpublished_quiz(owner);
 
-        assert!(quiz.editable_by(author));
+        assert!(quiz.editable_by(owner));
         assert!(!quiz.editable_by(user()));
     }
 
     #[test]
     fn inclusion_follows_the_policy() {
-        let author = user();
+        let owner = user();
         let other = user();
-        let mut quiz = unpublished_quiz(author);
+        let mut quiz = unpublished_quiz(owner);
 
-        assert!(quiz.includable_by(author));
+        assert!(quiz.includable_by(owner));
         assert!(!quiz.includable_by(other));
 
         quiz.change_inclusion_policy(InclusionPolicy::Anyone);
 
         assert_eq!(quiz.inclusion_policy(), InclusionPolicy::Anyone);
-        assert!(quiz.includable_by(author));
+        assert!(quiz.includable_by(owner));
         assert!(quiz.includable_by(other));
     }
 
@@ -920,7 +920,7 @@ mod tests {
     #[test]
     fn publishing_an_invalid_draft_reports_the_violations() {
         let draft = new_draft(None, Some("Tokyo"), Some(draft_free_input()), tags(0));
-        let mut quiz = Quiz::new(user(), draft, InclusionPolicy::AuthorOnly);
+        let mut quiz = Quiz::new(user(), draft, InclusionPolicy::OwnerOnly);
         let before = quiz.clone();
 
         assert_eq!(
