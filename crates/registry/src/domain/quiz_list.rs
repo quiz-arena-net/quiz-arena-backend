@@ -278,13 +278,14 @@ pub(crate) struct QuizList {
 }
 
 impl QuizList {
-    /// Creates a new quiz list with a freshly generated identifier.
+    /// Creates a new quiz list with a freshly generated identifier and no
+    /// quizzes. Quizzes join through [`QuizList::add_quiz`], which checks each
+    /// one.
     pub(crate) fn new(
         owner: UserId,
         title: QuizListTitle,
         description: Option<QuizListDescription>,
         visibility: Visibility,
-        entries: QuizListEntries,
         tags: TagSet,
     ) -> Self {
         Self {
@@ -293,7 +294,10 @@ impl QuizList {
             title,
             description,
             visibility,
-            entries,
+            entries: QuizListEntries {
+                id: QuizListEntriesId::new(),
+                quiz_ids: Vec::new(),
+            },
             tags,
         }
     }
@@ -482,14 +486,17 @@ mod tests {
     }
 
     fn new_quiz_list(quiz_ids: Vec<QuizId>, tags: TagSet) -> QuizList {
-        QuizList::new(
+        let mut quiz_list = QuizList::new(
             UserId::from_uuid(Uuid::now_v7()),
             QuizListTitle::parse("Capitals").unwrap(),
             None,
             Visibility::Private,
-            QuizListEntries::new(quiz_ids).unwrap(),
             tags,
-        )
+        );
+        for quiz_id in quiz_ids {
+            quiz_list.add_quiz(quiz_id, None).unwrap();
+        }
+        quiz_list
     }
 
     #[test]
@@ -645,6 +652,13 @@ mod tests {
 
         assert_eq!(quiz_list, edited);
         assert_ne!(quiz_list, new_quiz_list(Vec::new(), tags(0)));
+    }
+
+    #[test]
+    fn starts_without_quizzes() {
+        let quiz_list = new_quiz_list(Vec::new(), tags(0));
+
+        assert!(quiz_list.entries().quiz_ids().is_empty());
     }
 
     #[test]
