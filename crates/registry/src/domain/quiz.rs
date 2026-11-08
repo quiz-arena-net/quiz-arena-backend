@@ -508,8 +508,8 @@ pub(crate) struct Quiz {
     /// The user who owns this quiz.
     ///
     /// The owner may edit the quiz and decide whose lists may include it.
-    /// Ownership can be transferred to another user. The author recorded in the
-    /// content's [`Source`] never changes.
+    /// Ownership can be transferred to another user. Transferring does not
+    /// change the author recorded in each content version's [`Source`].
     owner: UserId,
 
     /// Whose quiz lists may include this quiz.

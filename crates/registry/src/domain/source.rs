@@ -56,10 +56,11 @@ pub(crate) enum SourceCreditParseError {
 pub(crate) enum Source {
     /// Written by a user of this service.
     User {
-        /// The user who wrote the quiz.
+        /// The user who wrote this version of the content.
         ///
-        /// Never changes, even when the quiz is transferred to another owner,
-        /// see [`Quiz::owner`](super::quiz::Quiz::owner).
+        /// Recorded per content version, independent of
+        /// [`Quiz::owner`](super::quiz::Quiz::owner). Transferring the quiz
+        /// does not change the author of versions already written.
         author: UserId,
     },
 
