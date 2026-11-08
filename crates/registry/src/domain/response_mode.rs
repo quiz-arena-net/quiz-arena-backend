@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use mitsein::{btree_set1::BTreeSet1, vec1::Vec1};
 use unicode_normalization::UnicodeNormalization;
+use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 
 use super::media::{Media, MediaKind};
 
@@ -574,16 +575,23 @@ pub(crate) enum ImageChoiceFromDraftError {
 
 /// A single character used in a character-by-character response.
 ///
-/// Guaranteed to be neither a control character nor whitespace.
+/// Guaranteed to be a letter, number, punctuation or symbol. Combining marks,
+/// separators, control and format characters, and unassigned or private use
+/// code points are rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct Character(char);
 
 impl Character {
     pub(crate) fn new(character: char) -> Result<Self, CharacterError> {
-        if character.is_control() || character.is_whitespace() {
-            return Err(CharacterError::Invalid);
+        match character.general_category_group() {
+            GeneralCategoryGroup::Letter
+            | GeneralCategoryGroup::Number
+            | GeneralCategoryGroup::Punctuation
+            | GeneralCategoryGroup::Symbol => Ok(Self(character)),
+            GeneralCategoryGroup::Mark
+            | GeneralCategoryGroup::Separator
+            | GeneralCategoryGroup::Other => Err(CharacterError::Invalid),
         }
-        Ok(Self(character))
     }
 
     pub(crate) fn as_char(&self) -> char {
@@ -593,7 +601,7 @@ impl Character {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum CharacterError {
-    #[error("character must not be a control character or whitespace")]
+    #[error("character must be a letter, number, punctuation or symbol")]
     Invalid,
 }
 
@@ -1001,15 +1009,18 @@ mod tests {
     }
 
     #[test]
-    fn accepts_printable_characters() {
-        for character in ['a', 'あ', '1', '!', '😀'] {
+    fn accepts_letters_numbers_punctuation_and_symbols() {
+        for character in ['a', 'あ', '1', '!', '$', '😀'] {
             assert_eq!(Character::new(character).unwrap().as_char(), character);
         }
     }
 
     #[test]
-    fn rejects_control_and_whitespace_characters() {
-        for character in ['\0', '\t', '\n', '\u{7f}', ' ', '\u{a0}', '\u{3000}'] {
+    fn rejects_marks_separators_and_other_characters() {
+        for character in [
+            '\0', '\t', '\n', '\u{7f}', ' ', '\u{a0}', '\u{3000}', '\u{2028}', '\u{301}',
+            '\u{3099}', '\u{200b}', '\u{202e}', '\u{feff}', '\u{e000}', '\u{378}',
+        ] {
             assert_eq!(
                 Character::new(character),
                 Err(CharacterError::Invalid),
