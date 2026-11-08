@@ -5,5 +5,4 @@ pub(super) mod response_mode;
 pub(super) mod source;
 pub(super) mod tag;
 pub(super) mod usage_terms;
-pub(super) mod user;
 pub(super) mod web_url;

@@ -5,7 +5,7 @@ use mitsein::vec1::Vec1;
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
-use quiz_arena_shared::kernel::domain::{Page, RepositoryError};
+use quiz_arena_shared::kernel::domain::{Page, RepositoryError, UserId};
 
 use super::{
     media::Media,
@@ -13,7 +13,6 @@ use super::{
     source::Source,
     tag::TagSet,
     usage_terms::UsageTerms,
-    user::UserId,
 };
 
 /// Uniquely identifies a quiz.

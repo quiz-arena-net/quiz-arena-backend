@@ -5,12 +5,11 @@ use chrono::{DateTime, Utc};
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
-use quiz_arena_shared::kernel::domain::{Page, RepositoryError};
+use quiz_arena_shared::kernel::domain::{Page, RepositoryError, UserId};
 
 use super::{
     quiz::{Quiz, QuizId},
     tag::TagSet,
-    user::UserId,
 };
 
 /// Uniquely identifies a quiz list.

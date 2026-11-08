@@ -1,7 +1,9 @@
 use chrono::{DateTime, Utc};
 use unicode_normalization::UnicodeNormalization;
 
-use super::{user::UserId, web_url::WebUrl};
+use quiz_arena_shared::kernel::domain::UserId;
+
+use super::web_url::WebUrl;
 
 /// A credit line naming where a quiz came from.
 ///
