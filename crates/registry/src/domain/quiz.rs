@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use isolang::Language;
 use mitsein::vec1::Vec1;
 use unicode_normalization::UnicodeNormalization;
@@ -517,20 +518,30 @@ pub(crate) struct Quiz {
 
     /// Where this quiz is in its publication lifecycle.
     state: QuizState,
+
+    /// When this quiz was created.
+    created_at: DateTime<Utc>,
+
+    /// When this quiz last changed. Updated whenever the quiz is modified.
+    updated_at: DateTime<Utc>,
 }
 
 impl Quiz {
-    /// Starts a new, unpublished quiz with a freshly generated identifier.
+    /// Starts a new, unpublished quiz with a freshly generated identifier,
+    /// created and last changed at `now`.
     pub(crate) fn new(
         owner: UserId,
         draft: DraftQuizContent,
         inclusion_policy: InclusionPolicy,
+        now: DateTime<Utc>,
     ) -> Self {
         Self {
             id: QuizId::new(),
             owner,
             inclusion_policy,
             state: QuizState::Unpublished { draft },
+            created_at: now,
+            updated_at: now,
         }
     }
 
@@ -543,12 +554,16 @@ impl Quiz {
         owner: UserId,
         inclusion_policy: InclusionPolicy,
         state: QuizState,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
     ) -> Self {
         Self {
             id,
             owner,
             inclusion_policy,
             state,
+            created_at,
+            updated_at,
         }
     }
 
@@ -566,6 +581,14 @@ impl Quiz {
 
     pub(crate) fn state(&self) -> &QuizState {
         &self.state
+    }
+
+    pub(crate) fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+
+    pub(crate) fn updated_at(&self) -> DateTime<Utc> {
+        self.updated_at
     }
 
     /// Returns whether `user` may edit this quiz.
@@ -591,32 +614,36 @@ impl Quiz {
     }
 
     /// Replaces the draft. Starts one if the quiz has none.
-    pub(crate) fn edit_draft(&mut self, draft: DraftQuizContent) {
+    pub(crate) fn edit_draft(&mut self, draft: DraftQuizContent, now: DateTime<Utc>) {
         match &mut self.state {
             QuizState::Unpublished { draft: current } => *current = draft,
             QuizState::Published { draft: current, .. } => *current = Some(draft),
         }
+        self.updated_at = now;
     }
 
     /// Drops the draft of a published quiz.
     ///
     /// An unpublished quiz has nothing but its draft, so discarding that draft
     /// means deleting the quiz.
-    pub(crate) fn discard_draft(&mut self) -> Result<(), DiscardDraftError> {
+    pub(crate) fn discard_draft(&mut self, now: DateTime<Utc>) -> Result<(), DiscardDraftError> {
         match &mut self.state {
-            QuizState::Unpublished { .. } => Err(DiscardDraftError::Unpublished),
-            QuizState::Published { draft, .. } => match draft.take() {
-                Some(_) => Ok(()),
-                None => Err(DiscardDraftError::NoDraft),
-            },
+            QuizState::Unpublished { .. } => return Err(DiscardDraftError::Unpublished),
+            QuizState::Published { draft, .. } => {
+                if draft.take().is_none() {
+                    return Err(DiscardDraftError::NoDraft);
+                }
+            }
         }
+        self.updated_at = now;
+        Ok(())
     }
 
     /// Publishes the draft as the next content version.
     ///
     /// For an unpublished quiz this creates the first version. The draft is
     /// consumed.
-    pub(crate) fn publish(&mut self) -> Result<(), PublishError> {
+    pub(crate) fn publish(&mut self, now: DateTime<Utc>) -> Result<(), PublishError> {
         let draft = match &self.state {
             QuizState::Unpublished { draft } => draft,
             QuizState::Published {
@@ -629,6 +656,7 @@ impl Quiz {
             content,
             draft: None,
         };
+        self.updated_at = now;
         Ok(())
     }
 
@@ -636,8 +664,13 @@ impl Quiz {
     ///
     /// Takes effect immediately and does not involve the draft. Inclusions that
     /// are no longer permitted are skipped when a session builds its lineup.
-    pub(crate) fn change_inclusion_policy(&mut self, inclusion_policy: InclusionPolicy) {
+    pub(crate) fn change_inclusion_policy(
+        &mut self,
+        inclusion_policy: InclusionPolicy,
+        now: DateTime<Utc>,
+    ) {
         self.inclusion_policy = inclusion_policy;
+        self.updated_at = now;
     }
 }
 
@@ -800,6 +833,14 @@ mod tests {
         UserId::from_uuid(Uuid::now_v7())
     }
 
+    fn now() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 11, 8, 12, 0, 0).unwrap()
+    }
+
+    fn later() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 11, 8, 13, 0, 0).unwrap()
+    }
+
     fn new_draft(
         prompt_text: Option<&str>,
         canonical_answer: Option<&str>,
@@ -828,12 +869,12 @@ mod tests {
     }
 
     fn unpublished_quiz(owner: UserId) -> Quiz {
-        Quiz::new(owner, complete_draft(), InclusionPolicy::OwnerOnly)
+        Quiz::new(owner, complete_draft(), InclusionPolicy::OwnerOnly, now())
     }
 
     fn published_quiz(owner: UserId) -> Quiz {
         let mut quiz = unpublished_quiz(owner);
-        quiz.publish().unwrap();
+        quiz.publish(now()).unwrap();
         quiz
     }
 
@@ -927,7 +968,7 @@ mod tests {
         let owner = user();
         let quiz = unpublished_quiz(owner);
         let mut edited = quiz.clone();
-        edited.edit_draft(new_draft(Some("Q"), Some("A"), None, tags(0)));
+        edited.edit_draft(new_draft(Some("Q"), Some("A"), None, tags(0)), now());
 
         assert_eq!(quiz, edited);
         assert_ne!(quiz, unpublished_quiz(owner));
@@ -951,7 +992,7 @@ mod tests {
         assert!(quiz.is_includable_by(owner));
         assert!(!quiz.is_includable_by(other));
 
-        quiz.change_inclusion_policy(InclusionPolicy::Anyone);
+        quiz.change_inclusion_policy(InclusionPolicy::Anyone, now());
 
         assert_eq!(quiz.inclusion_policy(), InclusionPolicy::Anyone);
         assert!(quiz.is_includable_by(owner));
@@ -962,17 +1003,43 @@ mod tests {
     fn an_unpublished_quiz_is_not_includable() {
         let owner = user();
         let mut quiz = unpublished_quiz(owner);
-        quiz.change_inclusion_policy(InclusionPolicy::Anyone);
+        quiz.change_inclusion_policy(InclusionPolicy::Anyone, now());
 
         assert!(!quiz.is_published());
         assert!(!quiz.is_includable_by(owner));
     }
 
     #[test]
+    fn records_creation_time() {
+        let quiz = unpublished_quiz(user());
+
+        assert_eq!(quiz.created_at(), now());
+        assert_eq!(quiz.updated_at(), now());
+    }
+
+    #[test]
+    fn operations_update_the_change_time() {
+        let mut quiz = unpublished_quiz(user());
+
+        quiz.publish(later()).unwrap();
+
+        assert_eq!(quiz.created_at(), now());
+        assert_eq!(quiz.updated_at(), later());
+    }
+
+    #[test]
+    fn a_rejected_operation_keeps_the_change_time() {
+        let mut quiz = published_quiz(user());
+
+        assert_eq!(quiz.discard_draft(later()), Err(DiscardDraftError::NoDraft));
+        assert_eq!(quiz.updated_at(), now());
+    }
+
+    #[test]
     fn publishes_the_first_version() {
         let mut quiz = unpublished_quiz(user());
 
-        quiz.publish().unwrap();
+        quiz.publish(now()).unwrap();
 
         assert!(matches!(
             quiz.state(),
@@ -988,14 +1055,12 @@ mod tests {
     fn publishes_the_draft_as_a_new_version() {
         let mut quiz = published_quiz(user());
         let first_version = published_content(&quiz).id();
-        quiz.edit_draft(new_draft(
-            Some("Q"),
-            Some("Kyoto"),
-            Some(draft_free_input()),
-            tags(0),
-        ));
+        quiz.edit_draft(
+            new_draft(Some("Q"), Some("Kyoto"), Some(draft_free_input()), tags(0)),
+            now(),
+        );
 
-        quiz.publish().unwrap();
+        quiz.publish(now()).unwrap();
 
         assert!(matches!(
             quiz.state(),
@@ -1011,11 +1076,11 @@ mod tests {
     #[test]
     fn publishing_an_invalid_draft_reports_the_violations() {
         let draft = new_draft(None, Some("Tokyo"), Some(draft_free_input()), tags(0));
-        let mut quiz = Quiz::new(user(), draft, InclusionPolicy::OwnerOnly);
+        let mut quiz = Quiz::new(user(), draft, InclusionPolicy::OwnerOnly, now());
         let before = quiz.clone();
 
         assert_eq!(
-            quiz.publish(),
+            quiz.publish(now()),
             Err(PublishError::DraftNotReady(Vec1::from_one(
                 QuizContentFromDraftError::NoPromptText
             )))
@@ -1027,7 +1092,7 @@ mod tests {
     fn publishing_without_a_draft_fails() {
         let mut quiz = published_quiz(user());
 
-        assert_eq!(quiz.publish(), Err(PublishError::NoDraft));
+        assert_eq!(quiz.publish(now()), Err(PublishError::NoDraft));
     }
 
     #[test]
@@ -1036,8 +1101,8 @@ mod tests {
         let mut unpublished = unpublished_quiz(user());
         let mut published = published_quiz(user());
 
-        unpublished.edit_draft(draft.clone());
-        published.edit_draft(draft.clone());
+        unpublished.edit_draft(draft.clone(), now());
+        published.edit_draft(draft.clone(), now());
 
         assert_eq!(
             unpublished.state(),
@@ -1054,14 +1119,14 @@ mod tests {
     #[test]
     fn discards_the_draft_of_a_published_quiz() {
         let mut quiz = published_quiz(user());
-        quiz.edit_draft(new_draft(Some("Q"), Some("A"), None, tags(0)));
+        quiz.edit_draft(new_draft(Some("Q"), Some("A"), None, tags(0)), now());
 
-        assert_eq!(quiz.discard_draft(), Ok(()));
+        assert_eq!(quiz.discard_draft(now()), Ok(()));
         assert!(matches!(
             quiz.state(),
             QuizState::Published { draft: None, .. }
         ));
-        assert_eq!(quiz.discard_draft(), Err(DiscardDraftError::NoDraft));
+        assert_eq!(quiz.discard_draft(now()), Err(DiscardDraftError::NoDraft));
     }
 
     #[test]
@@ -1069,7 +1134,10 @@ mod tests {
         let mut quiz = unpublished_quiz(user());
         let before = quiz.clone();
 
-        assert_eq!(quiz.discard_draft(), Err(DiscardDraftError::Unpublished));
+        assert_eq!(
+            quiz.discard_draft(now()),
+            Err(DiscardDraftError::Unpublished)
+        );
         assert_eq!(quiz.state(), before.state());
     }
 }

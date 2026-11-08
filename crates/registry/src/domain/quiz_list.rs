@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use chrono::{DateTime, Utc};
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
@@ -279,18 +280,25 @@ pub(crate) struct QuizList {
 
     /// Tags associated with this list.
     tags: TagSet,
+
+    /// When this list was created.
+    created_at: DateTime<Utc>,
+
+    /// When this list last changed. Updated whenever the quiz is modified.
+    updated_at: DateTime<Utc>,
 }
 
 impl QuizList {
     /// Creates a new quiz list with a freshly generated identifier and no
-    /// quizzes. Quizzes join through [`QuizList::add_quiz`], which checks each
-    /// one.
+    /// quizzes, created and last changed at `now`. Quizzes join through
+    /// [`QuizList::add_quiz`], which checks each one.
     pub(crate) fn new(
         owner: UserId,
         title: QuizListTitle,
         description: Option<QuizListDescription>,
         visibility: Visibility,
         tags: TagSet,
+        now: DateTime<Utc>,
     ) -> Self {
         Self {
             id: QuizListId::new(),
@@ -303,6 +311,8 @@ impl QuizList {
                 quiz_ids: Vec::new(),
             },
             tags,
+            created_at: now,
+            updated_at: now,
         }
     }
 
@@ -318,6 +328,8 @@ impl QuizList {
         visibility: Visibility,
         entries: QuizListEntries,
         tags: TagSet,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
     ) -> Self {
         Self {
             id,
@@ -327,6 +339,8 @@ impl QuizList {
             visibility,
             entries,
             tags,
+            created_at,
+            updated_at,
         }
     }
 
@@ -358,6 +372,14 @@ impl QuizList {
         &self.tags
     }
 
+    pub(crate) fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+
+    pub(crate) fn updated_at(&self) -> DateTime<Utc> {
+        self.updated_at
+    }
+
     /// Returns whether `user` may edit this quiz list.
     ///
     /// Only the owner may edit.
@@ -365,16 +387,23 @@ impl QuizList {
         user == self.owner
     }
 
-    pub(crate) fn change_title(&mut self, title: QuizListTitle) {
+    pub(crate) fn change_title(&mut self, title: QuizListTitle, now: DateTime<Utc>) {
         self.title = title;
+        self.updated_at = now;
     }
 
-    pub(crate) fn change_description(&mut self, description: Option<QuizListDescription>) {
+    pub(crate) fn change_description(
+        &mut self,
+        description: Option<QuizListDescription>,
+        now: DateTime<Utc>,
+    ) {
         self.description = description;
+        self.updated_at = now;
     }
 
-    pub(crate) fn change_visibility(&mut self, visibility: Visibility) {
+    pub(crate) fn change_visibility(&mut self, visibility: Visibility, now: DateTime<Utc>) {
         self.visibility = visibility;
+        self.updated_at = now;
     }
 
     /// Inserts a quiz at `position`, or appends it when `position` is `None`.
@@ -385,6 +414,7 @@ impl QuizList {
         &mut self,
         quiz: &Quiz,
         position: Option<usize>,
+        now: DateTime<Utc>,
     ) -> Result<(), AddQuizError> {
         if !quiz.is_published() {
             return Err(AddQuizError::QuizUnpublished);
@@ -404,13 +434,18 @@ impl QuizList {
                 AddQuizError::TooManyQuizzes { count }
             }
         })?;
+        self.updated_at = now;
         Ok(())
     }
 
     /// Removes a quiz from the list.
     ///
     /// Replaces the entries with a new version.
-    pub(crate) fn remove_quiz(&mut self, quiz_id: QuizId) -> Result<(), RemoveQuizError> {
+    pub(crate) fn remove_quiz(
+        &mut self,
+        quiz_id: QuizId,
+        now: DateTime<Utc>,
+    ) -> Result<(), RemoveQuizError> {
         let mut quiz_ids = self.entries.quiz_ids().to_vec();
         let position = quiz_ids
             .iter()
@@ -419,6 +454,7 @@ impl QuizList {
         quiz_ids.remove(position);
         self.entries = QuizListEntries::new(quiz_ids)
             .expect("removing a quiz keeps the entries within their invariants");
+        self.updated_at = now;
         Ok(())
     }
 
@@ -426,7 +462,11 @@ impl QuizList {
     ///
     /// Replaces the entries with a new version. `order` must be a permutation
     /// of the current quizzes.
-    pub(crate) fn reorder(&mut self, order: Vec<QuizId>) -> Result<(), ReorderError> {
+    pub(crate) fn reorder(
+        &mut self,
+        order: Vec<QuizId>,
+        now: DateTime<Utc>,
+    ) -> Result<(), ReorderError> {
         let current = self.entries.quiz_ids();
         let is_permutation = order.len() == current.len()
             && order.iter().collect::<BTreeSet<_>>() == current.iter().collect::<BTreeSet<_>>();
@@ -435,11 +475,13 @@ impl QuizList {
         }
         self.entries = QuizListEntries::new(order)
             .expect("a permutation of the entries keeps them within their invariants");
+        self.updated_at = now;
         Ok(())
     }
 
-    pub(crate) fn change_tags(&mut self, tags: TagSet) {
+    pub(crate) fn change_tags(&mut self, tags: TagSet, now: DateTime<Utc>) {
         self.tags = tags;
+        self.updated_at = now;
     }
 }
 
@@ -482,6 +524,7 @@ pub(crate) enum ReorderError {
 mod tests {
     use std::collections::BTreeSet;
 
+    use chrono::TimeZone;
     use isolang::Language;
 
     use super::*;
@@ -495,6 +538,14 @@ mod tests {
 
     fn user() -> UserId {
         UserId::from_uuid(Uuid::now_v7())
+    }
+
+    fn now() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 11, 8, 12, 0, 0).unwrap()
+    }
+
+    fn later() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 11, 8, 13, 0, 0).unwrap()
     }
 
     fn quiz_ids(count: usize) -> Vec<QuizId> {
@@ -515,12 +566,12 @@ mod tests {
             Source::User { author: owner },
             UsageTerms::AllRightsReserved,
         );
-        Quiz::new(owner, draft, inclusion_policy)
+        Quiz::new(owner, draft, inclusion_policy, now())
     }
 
     fn published_quiz(owner: UserId, inclusion_policy: InclusionPolicy) -> Quiz {
         let mut quiz = unpublished_quiz(owner, inclusion_policy);
-        quiz.publish().unwrap();
+        quiz.publish(now()).unwrap();
         quiz
     }
 
@@ -557,9 +608,10 @@ mod tests {
             None,
             Visibility::Private,
             tags,
+            now(),
         );
         for quiz in quizzes {
-            quiz_list.add_quiz(quiz, None).unwrap();
+            quiz_list.add_quiz(quiz, None, now()).unwrap();
         }
         quiz_list
     }
@@ -713,7 +765,7 @@ mod tests {
     fn quiz_lists_are_equal_by_identifier() {
         let quiz_list = new_quiz_list(&[], tags(0));
         let mut edited = quiz_list.clone();
-        edited.change_title(QuizListTitle::parse("Renamed").unwrap());
+        edited.change_title(QuizListTitle::parse("Renamed").unwrap(), now());
 
         assert_eq!(quiz_list, edited);
         assert_ne!(quiz_list, new_quiz_list(&[], tags(0)));
@@ -724,6 +776,35 @@ mod tests {
         let quiz_list = new_quiz_list(&[], tags(0));
 
         assert!(quiz_list.entries().quiz_ids().is_empty());
+    }
+
+    #[test]
+    fn records_creation_time() {
+        let quiz_list = new_quiz_list(&[], tags(0));
+
+        assert_eq!(quiz_list.created_at(), now());
+        assert_eq!(quiz_list.updated_at(), now());
+    }
+
+    #[test]
+    fn operations_update_the_change_time() {
+        let mut quiz_list = new_quiz_list(&[], tags(0));
+
+        quiz_list.change_visibility(Visibility::Public, later());
+
+        assert_eq!(quiz_list.created_at(), now());
+        assert_eq!(quiz_list.updated_at(), later());
+    }
+
+    #[test]
+    fn a_rejected_operation_keeps_the_change_time() {
+        let mut quiz_list = new_quiz_list(&[], tags(0));
+
+        assert_eq!(
+            quiz_list.remove_quiz(QuizId::new(), later()),
+            Err(RemoveQuizError::QuizNotFound)
+        );
+        assert_eq!(quiz_list.updated_at(), now());
     }
 
     #[test]
@@ -738,7 +819,7 @@ mod tests {
     fn changes_visibility() {
         let mut quiz_list = new_quiz_list(&[], tags(0));
 
-        quiz_list.change_visibility(Visibility::Public);
+        quiz_list.change_visibility(Visibility::Public, now());
 
         assert_eq!(quiz_list.visibility(), Visibility::Public);
     }
@@ -751,7 +832,7 @@ mod tests {
         let first_version = quiz_list.entries().id();
         let quiz = quiz();
 
-        quiz_list.add_quiz(&quiz, None).unwrap();
+        quiz_list.add_quiz(&quiz, None, now()).unwrap();
 
         assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], ids[1], quiz.id()]);
         assert_ne!(quiz_list.entries().id(), first_version);
@@ -764,7 +845,7 @@ mod tests {
         let mut quiz_list = new_quiz_list(&quizzes, tags(0));
         let quiz = quiz();
 
-        quiz_list.add_quiz(&quiz, Some(1)).unwrap();
+        quiz_list.add_quiz(&quiz, Some(1), now()).unwrap();
 
         assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], quiz.id(), ids[1]]);
     }
@@ -776,7 +857,7 @@ mod tests {
         let mut quiz_list = new_quiz_list(&quizzes, tags(0));
         let quiz = quiz();
 
-        quiz_list.add_quiz(&quiz, Some(2)).unwrap();
+        quiz_list.add_quiz(&quiz, Some(2), now()).unwrap();
 
         assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], ids[1], quiz.id()]);
     }
@@ -787,7 +868,7 @@ mod tests {
         let before = quiz_list.clone();
 
         assert_eq!(
-            quiz_list.add_quiz(&quiz(), Some(3)),
+            quiz_list.add_quiz(&quiz(), Some(3), now()),
             Err(AddQuizError::PositionOutOfRange { position: 3 })
         );
         assert_eq!(quiz_list.entries().id(), before.entries().id());
@@ -800,7 +881,7 @@ mod tests {
         let before = quiz_list.clone();
 
         assert_eq!(
-            quiz_list.add_quiz(&quizzes[0], None),
+            quiz_list.add_quiz(&quizzes[0], None, now()),
             Err(AddQuizError::DuplicateQuiz)
         );
         assert_eq!(quiz_list.entries().id(), before.entries().id());
@@ -812,7 +893,7 @@ mod tests {
         let before = quiz_list.clone();
 
         assert_eq!(
-            quiz_list.add_quiz(&quiz(), None),
+            quiz_list.add_quiz(&quiz(), None, now()),
             Err(AddQuizError::TooManyQuizzes { count: 101 })
         );
         assert_eq!(quiz_list.entries().id(), before.entries().id());
@@ -824,7 +905,7 @@ mod tests {
         let quiz = unpublished_quiz(user(), InclusionPolicy::Anyone);
 
         assert_eq!(
-            quiz_list.add_quiz(&quiz, None),
+            quiz_list.add_quiz(&quiz, None, now()),
             Err(AddQuizError::QuizUnpublished)
         );
     }
@@ -835,10 +916,10 @@ mod tests {
         let own = published_quiz(quiz_list.owner(), InclusionPolicy::OwnerOnly);
         let foreign = published_quiz(user(), InclusionPolicy::OwnerOnly);
 
-        quiz_list.add_quiz(&own, None).unwrap();
+        quiz_list.add_quiz(&own, None, now()).unwrap();
 
         assert_eq!(
-            quiz_list.add_quiz(&foreign, None),
+            quiz_list.add_quiz(&foreign, None, now()),
             Err(AddQuizError::QuizNotIncludable)
         );
         assert_eq!(quiz_list.entries().quiz_ids(), [own.id()]);
@@ -851,7 +932,7 @@ mod tests {
         let mut quiz_list = new_quiz_list(&quizzes, tags(0));
         let first_version = quiz_list.entries().id();
 
-        quiz_list.remove_quiz(ids[1]).unwrap();
+        quiz_list.remove_quiz(ids[1], now()).unwrap();
 
         assert_eq!(quiz_list.entries().quiz_ids(), [ids[0], ids[2]]);
         assert_ne!(quiz_list.entries().id(), first_version);
@@ -863,7 +944,7 @@ mod tests {
         let before = quiz_list.clone();
 
         assert_eq!(
-            quiz_list.remove_quiz(QuizId::new()),
+            quiz_list.remove_quiz(QuizId::new(), now()),
             Err(RemoveQuizError::QuizNotFound)
         );
         assert_eq!(quiz_list.entries().id(), before.entries().id());
@@ -876,7 +957,9 @@ mod tests {
         let mut quiz_list = new_quiz_list(&quizzes, tags(0));
         let first_version = quiz_list.entries().id();
 
-        quiz_list.reorder(vec![ids[2], ids[0], ids[1]]).unwrap();
+        quiz_list
+            .reorder(vec![ids[2], ids[0], ids[1]], now())
+            .unwrap();
 
         assert_eq!(quiz_list.entries().quiz_ids(), [ids[2], ids[0], ids[1]]);
         assert_ne!(quiz_list.entries().id(), first_version);
@@ -895,7 +978,10 @@ mod tests {
             vec![ids[0], ids[1], QuizId::new()],
             vec![ids[0], ids[0], ids[1]],
         ] {
-            assert_eq!(quiz_list.reorder(order), Err(ReorderError::NotAPermutation));
+            assert_eq!(
+                quiz_list.reorder(order, now()),
+                Err(ReorderError::NotAPermutation)
+            );
         }
         assert_eq!(quiz_list.entries().id(), before.entries().id());
     }
