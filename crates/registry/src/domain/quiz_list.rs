@@ -278,23 +278,16 @@ pub(crate) struct QuizList {
 }
 
 impl QuizList {
-    /// Creates a new quiz list with a freshly generated identifier and the
-    /// first version of its entries.
+    /// Creates a new quiz list with a freshly generated identifier.
     pub(crate) fn new(
         owner: UserId,
         title: QuizListTitle,
         description: Option<QuizListDescription>,
         visibility: Visibility,
-        quiz_ids: Vec<QuizId>,
+        entries: QuizListEntries,
         tags: TagSet,
-    ) -> Result<Self, QuizListError> {
-        let entries = QuizListEntries::new(quiz_ids).map_err(|error| match error {
-            QuizListEntriesError::DuplicateQuiz => QuizListError::DuplicateQuiz,
-            QuizListEntriesError::TooManyQuizzes { count } => {
-                QuizListError::TooManyQuizzes { count }
-            }
-        })?;
-        Ok(Self {
+    ) -> Self {
+        Self {
             id: QuizListId::new(),
             owner,
             title,
@@ -302,7 +295,7 @@ impl QuizList {
             visibility,
             entries,
             tags,
-        })
+        }
     }
 
     /// Reconstitutes a quiz list from stored state.
@@ -442,17 +435,6 @@ impl PartialEq for QuizList {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum QuizListError {
-    #[error("a quiz list must not contain the same quiz twice")]
-    DuplicateQuiz,
-    #[error(
-        "a quiz list must have at most {} quizzes, got {count}",
-        QuizListEntries::MAX_QUIZZES
-    )]
-    TooManyQuizzes { count: usize },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum AddQuizError {
     #[error("a quiz list must not contain the same quiz twice")]
     DuplicateQuiz,
@@ -499,13 +481,13 @@ mod tests {
         .unwrap()
     }
 
-    fn new_quiz_list(quiz_ids: Vec<QuizId>, tags: TagSet) -> Result<QuizList, QuizListError> {
+    fn new_quiz_list(quiz_ids: Vec<QuizId>, tags: TagSet) -> QuizList {
         QuizList::new(
             UserId::from_uuid(Uuid::now_v7()),
             QuizListTitle::parse("Capitals").unwrap(),
             None,
             Visibility::Private,
-            quiz_ids,
+            QuizListEntries::new(quiz_ids).unwrap(),
             tags,
         )
     }
@@ -637,17 +619,17 @@ mod tests {
 
     #[test]
     fn quiz_lists_are_equal_by_identifier() {
-        let quiz_list = new_quiz_list(Vec::new(), tags(0)).unwrap();
+        let quiz_list = new_quiz_list(Vec::new(), tags(0));
         let mut edited = quiz_list.clone();
         edited.change_title(QuizListTitle::parse("Renamed").unwrap());
 
         assert_eq!(quiz_list, edited);
-        assert_ne!(quiz_list, new_quiz_list(Vec::new(), tags(0)).unwrap());
+        assert_ne!(quiz_list, new_quiz_list(Vec::new(), tags(0)));
     }
 
     #[test]
     fn only_the_owner_may_edit() {
-        let quiz_list = new_quiz_list(Vec::new(), tags(0)).unwrap();
+        let quiz_list = new_quiz_list(Vec::new(), tags(0));
 
         assert!(quiz_list.editable_by(quiz_list.owner()));
         assert!(!quiz_list.editable_by(UserId::from_uuid(Uuid::now_v7())));
@@ -655,7 +637,7 @@ mod tests {
 
     #[test]
     fn changes_visibility() {
-        let mut quiz_list = new_quiz_list(Vec::new(), tags(0)).unwrap();
+        let mut quiz_list = new_quiz_list(Vec::new(), tags(0));
 
         quiz_list.change_visibility(Visibility::Public);
 
@@ -665,7 +647,7 @@ mod tests {
     #[test]
     fn appends_a_quiz() {
         let ids = quiz_ids(2);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
         let first_version = quiz_list.entries().id();
         let quiz_id = QuizId::new();
 
@@ -678,7 +660,7 @@ mod tests {
     #[test]
     fn inserts_a_quiz_at_a_position() {
         let ids = quiz_ids(2);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
         let quiz_id = QuizId::new();
 
         quiz_list.add_quiz(quiz_id, Some(1)).unwrap();
@@ -689,7 +671,7 @@ mod tests {
     #[test]
     fn inserts_a_quiz_at_the_end_position() {
         let ids = quiz_ids(2);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
         let quiz_id = QuizId::new();
 
         quiz_list.add_quiz(quiz_id, Some(2)).unwrap();
@@ -699,7 +681,7 @@ mod tests {
 
     #[test]
     fn rejects_a_position_beyond_the_end() {
-        let mut quiz_list = new_quiz_list(quiz_ids(2), tags(0)).unwrap();
+        let mut quiz_list = new_quiz_list(quiz_ids(2), tags(0));
         let before = quiz_list.clone();
 
         assert_eq!(
@@ -712,7 +694,7 @@ mod tests {
     #[test]
     fn rejects_adding_a_quiz_twice() {
         let ids = quiz_ids(2);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
         let before = quiz_list.clone();
 
         assert_eq!(
@@ -724,7 +706,7 @@ mod tests {
 
     #[test]
     fn rejects_adding_beyond_the_limit() {
-        let mut quiz_list = new_quiz_list(quiz_ids(100), tags(0)).unwrap();
+        let mut quiz_list = new_quiz_list(quiz_ids(100), tags(0));
         let before = quiz_list.clone();
 
         assert_eq!(
@@ -737,7 +719,7 @@ mod tests {
     #[test]
     fn removes_a_quiz() {
         let ids = quiz_ids(3);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
         let first_version = quiz_list.entries().id();
 
         quiz_list.remove_quiz(ids[1]).unwrap();
@@ -748,7 +730,7 @@ mod tests {
 
     #[test]
     fn rejects_removing_an_absent_quiz() {
-        let mut quiz_list = new_quiz_list(quiz_ids(2), tags(0)).unwrap();
+        let mut quiz_list = new_quiz_list(quiz_ids(2), tags(0));
         let before = quiz_list.clone();
 
         assert_eq!(
@@ -761,7 +743,7 @@ mod tests {
     #[test]
     fn reorders_the_quizzes() {
         let ids = quiz_ids(3);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
         let first_version = quiz_list.entries().id();
 
         quiz_list.reorder(vec![ids[2], ids[0], ids[1]]).unwrap();
@@ -773,7 +755,7 @@ mod tests {
     #[test]
     fn rejects_an_order_that_is_not_a_permutation() {
         let ids = quiz_ids(3);
-        let mut quiz_list = new_quiz_list(ids.clone(), tags(0)).unwrap();
+        let mut quiz_list = new_quiz_list(ids.clone(), tags(0));
         let before = quiz_list.clone();
 
         for order in [
