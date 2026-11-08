@@ -8,7 +8,9 @@ use uuid::Uuid;
 use super::{
     media::Media,
     response_mode::{DraftResponseMode, ResponseMode, ResponseModeFromDraftError},
+    source::Source,
     tag::{Tag, TagSet, TagSetError},
+    usage_terms::UsageTerms,
     user::UserId,
 };
 
@@ -176,6 +178,12 @@ pub(crate) struct DraftQuizContent {
 
     /// Tags.
     tags: BTreeSet<Tag>,
+
+    /// Where the quiz came from.
+    source: Source,
+
+    /// The terms under which the quiz may be used.
+    terms: UsageTerms,
 }
 
 impl DraftQuizContent {
@@ -186,6 +194,8 @@ impl DraftQuizContent {
         response_mode: Option<DraftResponseMode>,
         language: Language,
         tags: BTreeSet<Tag>,
+        source: Source,
+        terms: UsageTerms,
     ) -> Self {
         Self {
             prompt_text,
@@ -194,6 +204,8 @@ impl DraftQuizContent {
             response_mode,
             language,
             tags,
+            source,
+            terms,
         }
     }
 
@@ -219,6 +231,14 @@ impl DraftQuizContent {
 
     pub(crate) fn tags(&self) -> &BTreeSet<Tag> {
         &self.tags
+    }
+
+    pub(crate) fn source(&self) -> &Source {
+        &self.source
+    }
+
+    pub(crate) fn terms(&self) -> &UsageTerms {
+        &self.terms
     }
 }
 
@@ -270,6 +290,12 @@ pub(crate) struct QuizContent {
 
     /// Tags associated with this quiz.
     tags: TagSet,
+
+    /// Where this quiz came from.
+    source: Source,
+
+    /// The terms under which this quiz may be used.
+    terms: UsageTerms,
 }
 
 impl QuizContent {
@@ -281,6 +307,8 @@ impl QuizContent {
         response_mode: ResponseMode,
         language: Language,
         tags: TagSet,
+        source: Source,
+        terms: UsageTerms,
     ) -> Self {
         Self {
             id: QuizContentId::new(),
@@ -289,6 +317,8 @@ impl QuizContent {
             response_mode,
             language,
             tags,
+            source,
+            terms,
         }
     }
 
@@ -302,6 +332,8 @@ impl QuizContent {
         response_mode: ResponseMode,
         language: Language,
         tags: TagSet,
+        source: Source,
+        terms: UsageTerms,
     ) -> Self {
         Self {
             id,
@@ -310,6 +342,8 @@ impl QuizContent {
             response_mode,
             language,
             tags,
+            source,
+            terms,
         }
     }
 
@@ -335,6 +369,14 @@ impl QuizContent {
 
     pub(crate) fn tags(&self) -> &TagSet {
         &self.tags
+    }
+
+    pub(crate) fn source(&self) -> &Source {
+        &self.source
+    }
+
+    pub(crate) fn terms(&self) -> &UsageTerms {
+        &self.terms
     }
 }
 
@@ -396,6 +438,8 @@ impl TryFrom<DraftQuizContent> for QuizContent {
             response_mode,
             draft.language,
             tags,
+            draft.source,
+            draft.terms,
         ))
     }
 }
@@ -436,6 +480,9 @@ pub(crate) enum InclusionPolicy {
 /// the first content version. A published quiz may hold a draft of its next
 /// version.
 #[derive(Debug, Clone, PartialEq, Eq)]
+// A published quiz holds a version and possibly a draft, so the variants differ
+// in size by design. Quizzes are handled one at a time, not in bulk.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum QuizState {
     /// Never published. Only a draft exists.
     Unpublished {
@@ -755,6 +802,8 @@ mod tests {
             response_mode,
             Language::Eng,
             tags,
+            Source::User { author: user() },
+            UsageTerms::AllRightsReserved,
         )
     }
 

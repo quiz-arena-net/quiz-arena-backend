@@ -16,6 +16,7 @@ axum = "0.8.9"
 axum-otel-metrics = "0.14.1"
 buffa = { version = "0.8.1", features = ["json"] }
 buffa-types = { version = "0.8.1", features = ["json"] }
+chrono = "0.4.45"
 config = { version = "0.15.25", default-features = false, features = ["toml"] }
 connectrpc = { version = "0.8.1", features = ["axum"] }
 connectrpc-build = "0.8.0"
@@ -42,4 +43,5 @@ tracing = "0.1.44"
 tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 unicode-normalization = "0.1.26"
+url = "2.5.8"
 uuid = { version = "1.26.1", features = ["v7"] }
