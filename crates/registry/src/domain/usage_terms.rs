@@ -51,50 +51,44 @@ pub(crate) enum TermsDescriptionParseError {
     InvalidCharacter,
 }
 
-/// The conditions a Creative Commons license imposes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum CreativeCommonsKind {
-    /// CC BY. Attribution.
-    By,
-    /// CC BY-SA. Attribution, share alike.
-    BySa,
-    /// CC BY-NC. Attribution, non-commercial.
-    ByNc,
-    /// CC BY-NC-SA. Attribution, non-commercial, share alike.
-    ByNcSa,
-    /// CC BY-ND. Attribution, no derivatives.
-    ByNd,
-    /// CC BY-NC-ND. Attribution, non-commercial, no derivatives.
-    ByNcNd,
-}
-
 /// The version of a Creative Commons license.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum CreativeCommonsVersion {
     V4_0,
 }
 
-/// A Creative Commons license.
+/// A Creative Commons license or dedication.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct CreativeCommons {
-    /// The conditions the license imposes.
-    kind: CreativeCommonsKind,
-
-    /// The version of the license.
-    version: CreativeCommonsVersion,
+pub(crate) enum CreativeCommons {
+    /// CC0 1.0. A dedication to the public domain, not a license. Only one
+    /// version exists.
+    Zero,
+    /// CC BY. Attribution.
+    By(CreativeCommonsVersion),
+    /// CC BY-SA. Attribution, share alike.
+    BySa(CreativeCommonsVersion),
+    /// CC BY-NC. Attribution, non-commercial.
+    ByNc(CreativeCommonsVersion),
+    /// CC BY-NC-SA. Attribution, non-commercial, share alike.
+    ByNcSa(CreativeCommonsVersion),
+    /// CC BY-ND. Attribution, no derivatives.
+    ByNd(CreativeCommonsVersion),
+    /// CC BY-NC-ND. Attribution, non-commercial, no derivatives.
+    ByNcNd(CreativeCommonsVersion),
 }
 
 impl CreativeCommons {
-    pub(crate) fn new(kind: CreativeCommonsKind, version: CreativeCommonsVersion) -> Self {
-        Self { kind, version }
-    }
-
-    pub(crate) fn kind(&self) -> CreativeCommonsKind {
-        self.kind
-    }
-
-    pub(crate) fn version(&self) -> CreativeCommonsVersion {
-        self.version
+    /// Returns whether reuse requires crediting the rights holder.
+    pub(crate) fn requires_attribution(&self) -> bool {
+        match self {
+            Self::Zero => false,
+            Self::By(_)
+            | Self::BySa(_)
+            | Self::ByNc(_)
+            | Self::ByNcSa(_)
+            | Self::ByNd(_)
+            | Self::ByNcNd(_) => true,
+        }
     }
 }
 
@@ -146,10 +140,10 @@ pub(crate) enum UsageTerms {
     /// No reuse is allowed. This is the default under copyright law.
     AllRightsReserved,
 
-    /// Reuse is allowed under a Creative Commons license.
+    /// Reuse is allowed under a Creative Commons license or dedication.
     CreativeCommons(CreativeCommons),
 
-    /// Reuse is unrestricted. Covers public domain works and CC0 dedications.
+    /// Reuse is unrestricted because the work is in the public domain.
     PublicDomain,
 
     /// Reuse is allowed under terms the rights holder wrote out.
@@ -164,7 +158,7 @@ impl UsageTerms {
     pub(crate) fn requires_attribution(&self) -> bool {
         match self {
             Self::AllRightsReserved | Self::PublicDomain => false,
-            Self::CreativeCommons(_) => true,
+            Self::CreativeCommons(creative_commons) => creative_commons.requires_attribution(),
             Self::Custom(terms) => terms.requires_attribution(),
         }
     }
@@ -227,12 +221,10 @@ mod tests {
     fn attribution_follows_the_terms() {
         assert!(!UsageTerms::AllRightsReserved.requires_attribution());
         assert!(!UsageTerms::PublicDomain.requires_attribution());
+        assert!(!UsageTerms::CreativeCommons(CreativeCommons::Zero).requires_attribution());
         assert!(
-            UsageTerms::CreativeCommons(CreativeCommons::new(
-                CreativeCommonsKind::By,
-                CreativeCommonsVersion::V4_0
-            ))
-            .requires_attribution()
+            UsageTerms::CreativeCommons(CreativeCommons::By(CreativeCommonsVersion::V4_0))
+                .requires_attribution()
         );
         let description = TermsDescription::parse("Free to reuse.").unwrap();
         assert!(

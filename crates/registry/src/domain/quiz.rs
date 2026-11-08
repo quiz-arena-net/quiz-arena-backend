@@ -680,7 +680,7 @@ mod tests {
         media::{MediaId, MediaKind},
         response_mode::{DraftFreeInput, FreeInput, FreeInputAnswer, FreeInputFromDraftError},
         source::SourceCredit,
-        usage_terms::{CreativeCommons, CreativeCommonsKind, CreativeCommonsVersion},
+        usage_terms::{CreativeCommons, CreativeCommonsVersion},
         web_url::WebUrl,
     };
 
@@ -860,10 +860,7 @@ mod tests {
             url: Some(WebUrl::parse("https://quiz-works.com/").unwrap()),
             retrieved_at: Utc.with_ymd_and_hms(2026, 11, 8, 0, 0, 0).unwrap(),
         };
-        let terms = UsageTerms::CreativeCommons(CreativeCommons::new(
-            CreativeCommonsKind::By,
-            CreativeCommonsVersion::V4_0,
-        ));
+        let terms = UsageTerms::CreativeCommons(CreativeCommons::By(CreativeCommonsVersion::V4_0));
         let draft = DraftQuizContent::new(
             Some(PromptText::parse("What is the capital of Japan?").unwrap()),
             Some(media),
