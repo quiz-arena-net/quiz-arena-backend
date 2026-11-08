@@ -55,6 +55,9 @@ pub(crate) enum Source {
     /// Written by a user of this service.
     User {
         /// The user who wrote the quiz.
+        ///
+        /// Never changes, even when the quiz is transferred to another owner,
+        /// see [`Quiz::owner`](super::quiz::Quiz::owner).
         author: UserId,
     },
 
