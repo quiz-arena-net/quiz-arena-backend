@@ -670,8 +670,14 @@ mod tests {
     use mitsein::btree_set1::BTreeSet1;
 
     use super::*;
-    use crate::domain::response_mode::{
-        DraftFreeInput, FreeInput, FreeInputAnswer, FreeInputFromDraftError,
+    use chrono::{TimeZone, Utc};
+
+    use crate::domain::{
+        media::{MediaId, MediaKind},
+        response_mode::{DraftFreeInput, FreeInput, FreeInputAnswer, FreeInputFromDraftError},
+        source::SourceCredit,
+        usage_terms::{CreativeCommons, CreativeCommonsKind, CreativeCommonsVersion},
+        web_url::WebUrl,
     };
 
     fn free_input() -> ResponseMode {
@@ -844,16 +850,40 @@ mod tests {
 
     #[test]
     fn converts_a_complete_draft() {
-        let content = QuizContent::try_from(complete_draft()).unwrap();
+        let media = Media::new(MediaId::from_uuid(Uuid::now_v7()), MediaKind::Image);
+        let source = Source::External {
+            credit: SourceCredit::parse("Quiz Works").unwrap(),
+            url: Some(WebUrl::parse("https://quiz-works.com/").unwrap()),
+            retrieved_at: Utc.with_ymd_and_hms(2026, 11, 8, 0, 0, 0).unwrap(),
+        };
+        let terms = UsageTerms::CreativeCommons(CreativeCommons::new(
+            CreativeCommonsKind::By,
+            CreativeCommonsVersion::V4_0,
+        ));
+        let draft = DraftQuizContent::new(
+            Some(PromptText::parse("What is the capital of Japan?").unwrap()),
+            Some(media),
+            Some(CanonicalAnswer::parse("Tokyo").unwrap()),
+            Some(draft_free_input()),
+            Language::Jpn,
+            tags(1),
+            source.clone(),
+            terms.clone(),
+        );
+
+        let content = QuizContent::try_from(draft).unwrap();
 
         assert_eq!(
             content.prompt().text().as_str(),
             "What is the capital of Japan?"
         );
+        assert_eq!(content.prompt().media(), Some(media));
         assert_eq!(content.canonical_answer().as_str(), "Tokyo");
         assert_eq!(content.response_mode(), &free_input());
-        assert_eq!(content.language(), Language::Eng);
+        assert_eq!(content.language(), Language::Jpn);
         assert_eq!(content.tags().as_set(), &tags(1));
+        assert_eq!(content.source(), &source);
+        assert_eq!(content.terms(), &terms);
     }
 
     #[test]
