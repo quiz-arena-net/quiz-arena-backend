@@ -545,6 +545,10 @@ pub(crate) trait QuizListRepository: Send + Sync {
     async fn add(&self, quiz_list: &QuizList) -> Result<(), RepositoryError>;
 
     /// Persists changes to an existing quiz list.
+    ///
+    /// Fails with [`RepositoryError::Conflict`] when the stored list has
+    /// changed or vanished since `quiz_list` was read. The caller then reads
+    /// the list again and repeats its operation.
     async fn update(&self, quiz_list: &QuizList) -> Result<(), RepositoryError>;
 
     /// Removes a quiz list.

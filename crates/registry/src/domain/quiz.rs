@@ -723,6 +723,10 @@ pub(crate) trait QuizRepository: Send + Sync {
     async fn add(&self, quiz: &Quiz) -> Result<(), RepositoryError>;
 
     /// Persists changes to an existing quiz.
+    ///
+    /// Fails with [`RepositoryError::Conflict`] when the stored quiz has
+    /// changed or vanished since `quiz` was read. The caller then reads the
+    /// quiz again and repeats its operation.
     async fn update(&self, quiz: &Quiz) -> Result<(), RepositoryError>;
 
     /// Removes a quiz and all of its published content versions.
