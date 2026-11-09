@@ -8,8 +8,17 @@ quiz-arena-shared.workspace = true
 quiz-arena-proto.workspace = true
 
 anyhow.workspace = true
+chrono.workspace = true
 connectrpc.workspace = true
 facet.workspace = true
+isolang.workspace = true
+mitsein.workspace = true
 opentelemetry.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+unicode-normalization.workspace = true
+unicode-properties.workspace = true
+url.workspace = true
+uuid.workspace = true
+async-trait.workspace = true
