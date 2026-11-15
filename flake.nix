@@ -23,7 +23,7 @@
       {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            rust-bin.nightly.latest.default
+            rust-bin.stable.latest.default
             buf
             usql
           ];
