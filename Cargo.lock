@@ -2134,6 +2134,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "quiz-arena-gameplay"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "connectrpc",
+ "facet",
+ "opentelemetry",
+ "quiz-arena-proto",
+ "quiz-arena-shared",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "quiz-arena-greet"
 version = "0.1.0"
 dependencies = [
