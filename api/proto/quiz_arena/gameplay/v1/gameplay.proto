@@ -1,0 +1,5 @@
+syntax = "proto3";
+
+package quiz_arena.gameplay.v1;
+
+service GameplayService {}
